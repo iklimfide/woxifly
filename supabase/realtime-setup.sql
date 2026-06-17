@@ -1,0 +1,14 @@
+-- Supabase Realtime Broadcast + Presence ayarı
+-- Dashboard > Project Settings > Realtime bölümünden:
+--   ✓ Broadcast
+--   ✓ Presence
+--
+-- İlçe odaları istemci tarafında şu kanal adlarıyla açılır:
+--   room:kadikoy
+--   room:uskudar
+--   room:besiktas
+--
+-- Özel DM odaları:
+--   dm:{conversation_uuid}
+--
+-- Mesaj akışı: broadcast event "shout" → ardından async DB insert
