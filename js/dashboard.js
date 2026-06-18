@@ -67,6 +67,14 @@ import {
     describePushStatus
 } from './push-notifications.js';
 import {
+    configureTopbar,
+    refreshTopbarMenu,
+    closeTopbarMenus,
+    syncTopbarMenuIcon,
+    setTopbarTitleMode,
+    setTopbarProfileAvatar
+} from './topbar.js';
+import {
     initMessageInteractions,
     getPendingQuote,
     clearPendingQuote,
@@ -97,13 +105,12 @@ import {
 } from './hm-camouflage.js';
 import { initSeo } from './seo.js';
 import {
-    configureTopbar,
-    refreshTopbarMenu,
-    closeTopbarMenus,
-    syncTopbarMenuIcon,
-    setTopbarTitleMode,
-    setTopbarProfileAvatar
-} from './topbar.js';
+    initCloudPanel,
+    openCloudPanel,
+    refreshCloudAdminStatus,
+    isCloudAdminUser,
+    resetCloudPanel
+} from './cloud-panel.js';
 
 let currentUserId = null;
 let pendingForward = null;
@@ -239,6 +246,15 @@ async function restoreAppRoute(route) {
         return;
     }
 
+    if (route.view === 'bulut-panel') {
+        if (!isLoggedIn()) {
+            await showChatListHome();
+            return;
+        }
+        await openCloudPanel();
+        return;
+    }
+
     if (route.chatId?.startsWith('Group-')) {
         const district = route.chatId.replace('Group-', '');
         await openChat(route.chatId, `${district} Genel Odası`, 'Ortak Grup Odası');
@@ -323,6 +339,10 @@ function refreshAvatarDisplays() {
 
 function openProfileSettings() {
     switchView('profile-panel');
+}
+
+function openCloudAdminPanel() {
+    openCloudPanel();
 }
 
 function ensureRadarVisibilityNotifyActions() {
@@ -546,18 +566,26 @@ function showMainContentView() {
 }
 
 window.switchView = function (panelId) {
-    if (panelId === 'profile-panel' && !isLoggedIn()) {
+    if ((panelId === 'profile-panel' || panelId === 'bulut-panel') && !isLoggedIn()) {
         promptLogin();
         return;
     }
 
-    if (panelId === 'profile-panel') {
+    if (panelId === 'profile-panel' || panelId === 'bulut-panel') {
         showMainContentView();
     }
 
     document.querySelectorAll('.view-panel').forEach((p) => p.classList.remove('active'));
     document.getElementById(panelId).classList.add('active');
-    setTopbarTitleMode(panelId === 'profile-panel' ? 'profile' : 'chat');
+
+    if (panelId === 'profile-panel') {
+        setTopbarTitleMode('profile');
+    } else if (panelId === 'bulut-panel') {
+        setTopbarTitleMode('bulut');
+    } else {
+        setTopbarTitleMode('chat');
+    }
+
     if (panelId === 'profile-panel') {
         updatePushStatusUI();
         ensureHmProfileControls();
@@ -815,6 +843,8 @@ async function loadProfile() {
     refreshTopbarMenu();
     updateMessageInputState();
     updatePushStatusUI();
+    await refreshCloudAdminStatus();
+    refreshTopbarMenu();
 }
 
 async function saveProfile() {
@@ -2524,6 +2554,7 @@ async function handleLogout() {
     renderDmEmptyState();
     closeTopbarMenus();
     setNotificationUser(null);
+    resetCloudPanel();
     refreshAvatarDisplays();
     refreshTopbarMenu();
     updateMessageInputState();
@@ -2551,9 +2582,11 @@ async function refreshSessionState() {
         }
 
         refreshAvatarDisplays();
+        await refreshCloudAdminStatus();
         refreshTopbarMenu();
     } else {
         setNotificationUser(null);
+        resetCloudPanel();
         renderDmEmptyState();
         refreshAvatarDisplays();
         refreshTopbarMenu();
@@ -2593,6 +2626,14 @@ async function initDashboard() {
         onRegister: promptRegister
     }));
     runInitStep('initNotifyModal', initNotifyModal);
+    runInitStep('initCloudPanel', () => initCloudPanel({
+        getSession,
+        isLoggedIn,
+        switchView,
+        promptLogin,
+        showNotify,
+        onAdminStatusChange: () => refreshTopbarMenu()
+    }));
     runInitStep('initMediaComposer', initMediaComposer);
     runInitStep('initMessageInteractions', () => initMessageInteractions({
         messageContainer: document.getElementById('messageContainer'),
@@ -2638,12 +2679,14 @@ async function initDashboard() {
         setNotificationUser(currentUserId);
         profileReadyPromise = loadProfile();
         await profileReadyPromise;
+        await refreshCloudAdminStatus();
         document.getElementById('myActiveChatsList').innerHTML = '';
         await loadDmHistory();
         updateDistrictGroupTab();
     } else {
         renderDmEmptyState();
         setNotificationUser(null);
+        resetCloudPanel();
         maybeShowWelcomeModal();
     }
 
@@ -2773,9 +2816,11 @@ async function handleStartupNotificationRoute() {
 
 configureTopbar({
     getIsLoggedIn: isLoggedIn,
+    getIsCloudAdmin: isCloudAdminUser,
     onLogin: promptLogin,
     onRegister: promptRegister,
     onProfileSettings: openProfileSettings,
+    onCloudPanel: openCloudAdminPanel,
     onLogout: handleLogout,
     onMenuClick: () => window.toggleSidebar?.()
 });

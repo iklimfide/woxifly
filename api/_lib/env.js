@@ -34,7 +34,7 @@ function parseEnvFile(content) {
     }
 }
 
-function bootstrapEnv() {
+export function bootstrapEnv() {
     if (envBootstrapped) return;
     envBootstrapped = true;
 

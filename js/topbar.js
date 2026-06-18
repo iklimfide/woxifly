@@ -38,9 +38,11 @@ body.chats-home-view .app-topbar__menu-btn{visibility:hidden;pointer-events:none
 
 const actions = {
     getIsLoggedIn: () => false,
+    getIsCloudAdmin: () => false,
     onLogin: () => {},
     onRegister: () => {},
     onProfileSettings: () => {},
+    onCloudPanel: () => {},
     onLogout: () => {},
     onMenuClick: () => {}
 };
@@ -188,11 +190,25 @@ function toggleProfileMenu() {
 export function setTopbarTitleMode(mode) {
     const chat = qs('headerTitleChat');
     const profile = qs('headerTitleProfile');
+    const profileLabel = qs('headerProfileTabTitle');
     if (!chat || !profile) return;
 
-    const isProfile = mode === 'profile';
-    chat.hidden = isProfile;
-    profile.hidden = !isProfile;
+    if (mode === 'profile') {
+        chat.hidden = true;
+        profile.hidden = false;
+        if (profileLabel) profileLabel.textContent = 'Profil Ayarları';
+        return;
+    }
+
+    if (mode === 'bulut') {
+        chat.hidden = true;
+        profile.hidden = false;
+        if (profileLabel) profileLabel.textContent = 'Bulut YP';
+        return;
+    }
+
+    chat.hidden = false;
+    profile.hidden = true;
 }
 
 export function syncTopbarMenuIcon() {
@@ -233,11 +249,19 @@ export function refreshTopbarMenu() {
     panel.setAttribute('role', 'menu');
 
     if (actions.getIsLoggedIn()) {
-        panel.append(
-            addMenuItem('⚙️ Profil Ayarları', actions.onProfileSettings),
+        const items = [
+            addMenuItem('⚙️ Profil Ayarları', actions.onProfileSettings)
+        ];
+
+        if (actions.getIsCloudAdmin()) {
+            items.push(addMenuItem('☁️ Bulut YP', actions.onCloudPanel));
+        }
+
+        items.push(
             addMenuDivider(),
             addMenuItem('🚪 Çıkış Yap', actions.onLogout, { danger: true })
         );
+        panel.append(...items);
         return;
     }
 

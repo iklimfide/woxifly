@@ -550,7 +550,7 @@
             100% { background-position: -100% 0; }
         }
         
-        .message { width: fit-content; max-width: min(88vw, 320px); padding: 5px 8px 4px 9px; border-radius: 12px; font-size: 1rem; line-height: 1.35; box-shadow: 0 1px 2px rgba(0,0,0,0.05); word-break: break-word; overflow-wrap: anywhere; }
+        .message { width: fit-content; max-width: min(88vw, 320px); padding: 5px 8px 4px 9px; border-radius: 12px; font-size: 17px; line-height: 1.35; box-shadow: 0 1px 2px rgba(0,0,0,0.05); word-break: break-word; overflow-wrap: anywhere; }
         .message-sender { font-size: 0.72rem; font-weight: 700; color: var(--accent-color); margin-bottom: 3px; display: block; }
         .message-sender.clickable { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
         .message-sender.clickable:hover { color: #1a6cb1; }
@@ -579,6 +579,14 @@
             pointer-events: none;
         }
         .message-body { display: inline; white-space: pre-wrap; word-break: break-word; }
+        .message.incoming .message-body {
+            color: var(--text-main);
+            font-weight: 500;
+        }
+        .message.outgoing .message-body {
+            color: #0f2d4d;
+            font-weight: 500;
+        }
         .message-body a.message-link { text-decoration: underline; text-underline-offset: 2px; font-weight: 600; }
         .message.incoming .message-body a.message-link { color: var(--accent-color); }
         .message.outgoing .message-body a.message-link { color: #0d4a82; }
@@ -624,14 +632,6 @@
         }
         .message.outgoing .message-quote-body { color: #4a6d8f; }
         .message.outgoing .message-quote--self .message-quote-body { color: #3d6280; }
-        .message.has-quote .message-body {
-            color: var(--text-main);
-            font-weight: 500;
-        }
-        .message.outgoing.has-quote .message-body {
-            color: #0f2d4d;
-            font-weight: 500;
-        }
 
         .message-reactions {
             display: flex;
@@ -1642,6 +1642,231 @@
             font-weight: 700;
             margin-bottom: 8px;
             color: var(--text-main);
+        }
+
+        /* BULUT YP */
+        .cloud-shell {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+            overflow: hidden;
+            background: #f8fafc;
+        }
+
+        .cloud-sidebar,
+        .cloud-thread {
+            position: absolute;
+            inset: 0;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+            transition: transform 0.28s ease;
+            will-change: transform;
+        }
+
+        .cloud-sidebar {
+            z-index: 1;
+            transform: translateX(0);
+            border-right: 1px solid var(--border-color);
+        }
+
+        .cloud-thread {
+            z-index: 2;
+            transform: translateX(100%);
+        }
+
+        #bulut-panel.cloud-detail-open .cloud-sidebar {
+            transform: translateX(-100%);
+        }
+
+        #bulut-panel.cloud-detail-open .cloud-thread {
+            transform: translateX(0);
+        }
+
+        .cloud-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+            background: #fff;
+        }
+
+        .cloud-toolbar input,
+        .cloud-toolbar select {
+            flex: 1 1 140px;
+            min-width: 0;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            background: #f8fafc;
+        }
+
+        .cloud-toolbar button {
+            padding: 10px 14px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: #fff;
+            color: #334155;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+
+        .cloud-status {
+            padding: 8px 12px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .cloud-status--error { color: #c53030; }
+
+        .cloud-conversation-list,
+        .cloud-message-thread {
+            flex: 1;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .cloud-conv-item {
+            width: 100%;
+            text-align: left;
+            border: none;
+            border-bottom: 1px solid #edf2f7;
+            background: #fff;
+            padding: 12px;
+            cursor: pointer;
+        }
+
+        .cloud-conv-item.is-active,
+        .cloud-conv-item:hover {
+            background: #f0f7ff;
+        }
+
+        .cloud-conv-item__title {
+            display: block;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 4px;
+        }
+
+        .cloud-conv-item__meta,
+        .cloud-conv-item__preview {
+            display: block;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .cloud-thread-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+            background: #fff;
+        }
+
+        .cloud-thread-back {
+            border: none;
+            background: #edf2f7;
+            color: #334155;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .cloud-thread-title-wrap {
+            min-width: 0;
+        }
+
+        .cloud-thread-title {
+            font-weight: 700;
+            color: #1a202c;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .cloud-thread-meta {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .cloud-message-thread {
+            padding: 12px;
+            background: #f8fafc;
+        }
+
+        .cloud-msg {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+        }
+
+        .cloud-msg--deleted {
+            border-color: #feb2b2;
+            background: #fff5f5;
+        }
+
+        .cloud-msg--deleted .cloud-msg__head strong,
+        .cloud-msg--deleted .cloud-msg__body {
+            color: #c53030;
+        }
+
+        .cloud-conv-item__preview--deleted {
+            color: #c53030;
+        }
+
+        .cloud-msg__head {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .cloud-msg__head strong {
+            color: #2d3748;
+            font-size: 0.82rem;
+        }
+
+        .cloud-msg__body {
+            font-size: 0.92rem;
+            color: #1a202c;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .cloud-load-older {
+            display: block;
+            width: calc(100% - 24px);
+            margin: 0 12px 12px;
+            padding: 10px;
+            border: 1px dashed var(--border-color);
+            border-radius: 8px;
+            background: #fff;
+            color: #334155;
+            cursor: pointer;
+        }
+
+        .cloud-empty {
+            padding: 24px 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.9rem;
         }
 
         .profile-avatar-row {
@@ -2792,6 +3017,36 @@
                     <button type="button" class="notify-btn" id="pushToggleBtn">Bildirim İzinlerini Yönet</button>
                     <span class="push-status" id="pushStatusText">Durum kontrol ediliyor…</span>
                 </div>
+            </div>
+        </div>
+
+        <!-- PANEL 3: BULUT YP -->
+        <div id="bulut-panel" class="view-panel">
+            <div class="cloud-shell">
+                <aside class="cloud-sidebar">
+                    <div class="cloud-toolbar">
+                        <input type="search" id="cloudSearchInput" placeholder="Sohbet veya rumuz ara…" autocomplete="off">
+                        <select id="cloudTypeFilter" aria-label="Sohbet türü">
+                            <option value="all">Tümü</option>
+                            <option value="group">Grup</option>
+                            <option value="dm">Özel</option>
+                        </select>
+                        <button type="button" id="cloudRefreshBtn">Yenile</button>
+                    </div>
+                    <div class="cloud-status" id="cloudStatus">Sohbetler yükleniyor…</div>
+                    <div class="cloud-conversation-list" id="cloudConversationList"></div>
+                </aside>
+                <section class="cloud-thread">
+                    <div class="cloud-thread-header">
+                        <button type="button" class="cloud-thread-back" id="cloudThreadBack" hidden aria-label="Sohbet listesine dön">← Geri</button>
+                        <div class="cloud-thread-title-wrap">
+                            <div class="cloud-thread-title" id="cloudThreadTitle">Sohbet seçin</div>
+                            <div class="cloud-thread-meta" id="cloudThreadMeta">Soldan bir yazışma seçerek içeriği görüntüleyin.</div>
+                        </div>
+                    </div>
+                    <div class="cloud-message-thread" id="cloudMessageThread"></div>
+                    <button type="button" class="cloud-load-older" id="cloudLoadOlderBtn" hidden>Daha eski mesajları yükle</button>
+                </section>
             </div>
         </div>
     </main>

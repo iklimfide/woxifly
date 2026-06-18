@@ -4,7 +4,7 @@ const SLUG_TO_DISTRICT = new Map(
     DISTRICTS.map((district) => [districtToRoomSlug(district), district])
 );
 
-const RESERVED_TOP_LEVEL = new Set(['uye', 'profil', 'profile', 'sohbetler', 'chats']);
+const RESERVED_TOP_LEVEL = new Set(['uye', 'profil', 'profile', 'sohbetler', 'chats', 'bulut']);
 
 export function usernameToSlug(username) {
     if (!username) return '';
@@ -23,6 +23,7 @@ export function roomSlugToDistrict(slug) {
 
 export function buildAppPath({ activePanel, currentActiveChat, username } = {}) {
     if (activePanel === 'profile-panel') return '/profil';
+    if (activePanel === 'bulut-panel') return '/bulut';
     if (!currentActiveChat) return '/';
 
     if (currentActiveChat.startsWith('Group-')) {
@@ -49,6 +50,10 @@ export function parseAppPath(pathname) {
         return { view: 'profile-panel' };
     }
 
+    if (path === '/bulut') {
+        return { view: 'bulut-panel' };
+    }
+
     const dmMatch = path.match(/^\/uye\/([^/]+)$/i);
     if (dmMatch) {
         return { usernameSlug: decodeURIComponent(dmMatch[1]).toLowerCase() };
@@ -70,6 +75,7 @@ export function parseLegacyHash(hash) {
     if (!raw) return null;
 
     if (raw === 'profile') return { view: 'profile-panel' };
+    if (raw === 'bulut') return { view: 'bulut-panel' };
     if (raw === 'chats') return { view: 'chats-home' };
 
     const [type, ...rest] = raw.split('/');
