@@ -42,7 +42,7 @@ export async function uploadFile(file, kind) {
     }
 
     const url = toMediaUrl(data.url);
-    if (!url || !isValidMediaUrl(url)) {
+    if (!url || !isValidMediaUrl(url, data.r2Key)) {
         throw new Error('Sunucu geçersiz medya adresi döndürdü.');
     }
 

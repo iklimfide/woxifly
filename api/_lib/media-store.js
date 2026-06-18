@@ -10,9 +10,23 @@ export const MEDIA_KINDS = {
         prefix: 'images'
     },
     video: {
-        mimes: new Set(['video/mp4', 'video/webm', 'video/quicktime']),
+        mimes: new Set([
+            'video/mp4',
+            'video/webm',
+            'video/quicktime',
+            'video/x-matroska',
+            'video/3gpp',
+            'video/x-msvideo'
+        ]),
         maxBytes: 50 * 1024 * 1024,
-        ext: { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' },
+        ext: {
+            'video/mp4': 'mp4',
+            'video/webm': 'webm',
+            'video/quicktime': 'mov',
+            'video/x-matroska': 'mkv',
+            'video/3gpp': '3gp',
+            'video/x-msvideo': 'avi'
+        },
         // Mevcut R2 dosyaları uploads/{userId}/ altında; videos/ klasörü boş.
         prefix: 'uploads'
     },
@@ -84,8 +98,9 @@ export function mediaProxyUrl(r2Key) {
 /** Broadcast ve istemci için: R2_PUBLIC_BASE_URL varsa doğrudan CDN adresi döner. */
 export function mediaPublicUrl(r2Key) {
     const { publicBaseUrl } = getR2Config();
-    if (publicBaseUrl) {
-        return `${publicBaseUrl.replace(/\/$/, '')}/${r2Key}`;
+    const base = (publicBaseUrl || '').replace(/\/$/, '');
+    if (base && !base.includes('r2.cloudflarestorage.com')) {
+        return `${base}/${r2Key}`;
     }
     return mediaProxyUrl(r2Key);
 }
@@ -95,16 +110,30 @@ function normalizeMimeType(mimeType) {
     if (base === 'audio/x-m4a' || base === 'audio/aac' || base === 'audio/x-aac') {
         return 'audio/mp4';
     }
+    if (base === 'video/x-m4v') return 'video/mp4';
+    if (base === 'application/octet-stream') return base;
     return base;
 }
 
-function validateFile(fileBuffer, mimeType, kind) {
+function inferMimeFromName(fileName, kind) {
+    const ext = String(fileName || '').split('.').pop()?.toLowerCase();
+    if (!ext) return null;
+    const rules = MEDIA_KINDS[kind];
+    if (!rules) return null;
+    for (const [mime, mappedExt] of Object.entries(rules.ext)) {
+        if (mappedExt === ext) return mime;
+    }
+    return null;
+}
+
+function validateFile(fileBuffer, mimeType, kind, fileName = '') {
     const rules = MEDIA_KINDS[kind];
     if (!rules) return { error: 'Geçersiz medya tipi.' };
 
     mimeType = normalizeMimeType(mimeType);
     if (!mimeType || mimeType === 'application/octet-stream') {
-        const fallback = {
+        const fromName = inferMimeFromName(fileName, kind);
+        const fallback = fromName || {
             audio: 'audio/webm',
             image: 'image/jpeg',
             video: 'video/mp4',
@@ -123,11 +152,11 @@ function validateFile(fileBuffer, mimeType, kind) {
     return { ext, mimeType };
 }
 
-export async function saveMedia({ userId, fileBuffer, mimeType, kind }) {
+export async function saveMedia({ userId, fileBuffer, mimeType, kind, fileName = '' }) {
     const { bucket } = getR2Config();
     if (!bucket) throw new Error('R2_BUCKET_NAME eksik.');
 
-    const validation = validateFile(fileBuffer, mimeType, kind);
+    const validation = validateFile(fileBuffer, mimeType, kind, fileName);
     if (validation.error) return { error: validation.error };
 
     mimeType = validation.mimeType;

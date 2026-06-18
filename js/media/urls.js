@@ -133,12 +133,46 @@ export function isValidMediaUrl(url, r2Key = null) {
     return !!toPersistMediaUrl(url, r2Key);
 }
 
-export function kindFromFile(file) {
-    if (!file?.type) return null;
-    if (file.type.startsWith('image/')) return 'image';
-    if (file.type.startsWith('video/')) return 'video';
-    if (file.type.startsWith('audio/')) return 'audio';
+const EXT_KIND = {
+    jpg: 'image',
+    jpeg: 'image',
+    png: 'image',
+    webp: 'image',
+    gif: 'image',
+    heic: 'image',
+    heif: 'image',
+    mp4: 'video',
+    m4v: 'video',
+    webm: 'video',
+    mov: 'video',
+    mkv: 'video',
+    '3gp': 'video',
+    avi: 'video',
+    ogg: 'audio',
+    mp3: 'audio',
+    wav: 'audio',
+    m4a: 'audio',
+    aac: 'audio'
+};
+
+function mimeKind(mime) {
+    const base = (mime || '').split(';')[0].trim().toLowerCase();
+    if (!base) return null;
+    if (base.startsWith('image/')) return 'image';
+    if (base.startsWith('video/')) return 'video';
+    if (base.startsWith('audio/')) return 'audio';
+    if (base === 'application/octet-stream') return null;
     return null;
+}
+
+function extensionKind(fileName) {
+    const ext = String(fileName || '').split('.').pop()?.toLowerCase();
+    return ext ? EXT_KIND[ext] || null : null;
+}
+
+export function kindFromFile(file) {
+    if (!file) return null;
+    return mimeKind(file.type) || extensionKind(file.name);
 }
 
 export const MEDIA_KINDS = new Set(['image', 'video', 'audio']);

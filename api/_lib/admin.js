@@ -9,16 +9,50 @@ function env(name, fallback = '') {
     return fallback;
 }
 
-export function getAdminAllowlist() {
-    const userIds = env('ADMIN_USER_IDS', '')
+function splitList(raw) {
+    return (raw || '')
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean);
+}
 
-    const emails = env('ADMIN_EMAILS', '')
-        .split(',')
-        .map((item) => item.trim().toLowerCase())
-        .filter(Boolean);
+function mergeUnique(target, items) {
+    for (const item of items) {
+        if (!target.includes(item)) target.push(item);
+    }
+}
+
+function readEnvList(...names) {
+    const values = [];
+    for (const name of names) {
+        mergeUnique(values, splitList(env(name)));
+    }
+    return values;
+}
+
+export function getAdminAllowlist() {
+    const userIds = readEnvList(
+        'ADMIN_USER_IDS',
+        'MASTER_USER_IDS',
+        'MASTER_USER_ID'
+    );
+
+    const emails = readEnvList(
+        'ADMIN_EMAILS',
+        'MASTER_USER_EMAILS',
+        'MASTER_USER_EMAIL',
+        'MASTER_EMAIL',
+        'MASTER_EMAILS'
+    ).map((item) => item.toLowerCase());
+
+    const masterUser = env('MASTER_USER');
+    if (masterUser) {
+        if (masterUser.includes('@')) {
+            mergeUnique(emails, [masterUser.toLowerCase()]);
+        } else {
+            mergeUnique(userIds, [masterUser]);
+        }
+    }
 
     return { userIds, emails };
 }
@@ -33,4 +67,9 @@ export function isAdminUser(user) {
 
     const email = (user.email || '').trim().toLowerCase();
     return email ? emails.includes(email) : false;
+}
+
+export function hasAdminConfig() {
+    const { userIds, emails } = getAdminAllowlist();
+    return userIds.length > 0 || emails.length > 0;
 }

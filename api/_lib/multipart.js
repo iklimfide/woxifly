@@ -67,8 +67,14 @@ export function parseMultipart(buffer, boundary) {
             || headerText.match(/name=([^\s;]+)/i);
         const contentTypeMatch = headerText.match(/Content-Type:\s*([^\r\n]+)/i);
 
+        const filenameMatch = headerText.match(/filename\*?=(?:UTF-8''|")?([^";\r\n]+)/i);
+        const filename = filenameMatch
+            ? decodeURIComponent(filenameMatch[1].replace(/"/g, '').trim())
+            : '';
+
         parts.push({
             name: nameMatch?.[1] || '',
+            filename,
             contentType: contentTypeMatch?.[1] || 'application/octet-stream',
             data
         });

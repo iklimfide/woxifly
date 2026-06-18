@@ -77,7 +77,10 @@ async function requireAdmin(req, res) {
     }
 
     if (!isAdminUser(auth.user)) {
-        res.status(403).json({ error: 'Bulut YP erişimi yok.' });
+        res.status(403).json({
+            error: 'Bulut YP erişimi yok.',
+            hint: 'Vercel ortam değişkenlerinde ADMIN_EMAILS veya MASTER_USER (giriş e-postanız) tanımlı olmalı.'
+        });
         return null;
     }
 
@@ -207,7 +210,7 @@ async function handleMessages(client, query, res) {
 
     let msgQuery = client
         .from('messages')
-        .select('id, body, created_at, sender_id, content_type, media_url, r2_key, deleted_at, client_id')
+        .select('id, body, created_at, sender_id, sender_username, receiver_id, receiver_username, content_type, media_url, r2_key, deleted_at, client_id')
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: false })
         .limit(limit);
@@ -223,7 +226,7 @@ async function handleMessages(client, query, res) {
     }
 
     const ordered = [...(messages || [])].reverse();
-    const senderIds = [...new Set(ordered.map((item) => item.sender_id))];
+    const senderIds = [...new Set(ordered.filter((item) => !item.sender_username).map((item) => item.sender_id))];
     const profileMap = new Map();
 
     if (senderIds.length) {
@@ -277,7 +280,9 @@ async function handleMessages(client, query, res) {
             body: message.body,
             createdAt: message.created_at,
             senderId: message.sender_id,
-            senderName: profileMap.get(message.sender_id) || 'Kullanıcı',
+            senderName: message.sender_username || profileMap.get(message.sender_id) || 'Kullanıcı',
+            receiverId: message.receiver_id,
+            receiverName: message.receiver_username || null,
             contentType: message.content_type || 'text',
             mediaUrl: message.media_url,
             r2Key: message.r2_key,

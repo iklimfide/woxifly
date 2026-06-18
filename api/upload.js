@@ -73,16 +73,9 @@ export default async function handler(req, res) {
             return;
         }
 
-        let mimeType = (filePart.contentType || '').split(';')[0].trim().toLowerCase();
-        if (!mimeType || mimeType === 'application/octet-stream') {
-            const defaults = {
-                audio: 'audio/webm',
-                image: 'image/jpeg',
-                video: 'video/mp4',
-                avatar: 'image/jpeg'
-            };
-            mimeType = defaults[kind] || mimeType;
-        }
+        const mimeType = (filePart.contentType || '').split(';')[0].trim().toLowerCase();
+        const fileName = filePart.filename || '';
+
         const previousAvatarKey = kind === 'avatar'
             ? await getPreviousAvatarKey(req, auth.user.id)
             : null;
@@ -91,7 +84,8 @@ export default async function handler(req, res) {
             userId: auth.user.id,
             fileBuffer: filePart.data,
             mimeType,
-            kind
+            kind,
+            fileName
         });
 
         if (result.error) {

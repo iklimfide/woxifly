@@ -9,6 +9,12 @@ function el(tag, className, text) {
     return node;
 }
 
+function pickVideoPosterTime(duration) {
+    if (!Number.isFinite(duration) || duration <= 0) return 0;
+    if (duration <= 0.2) return 0;
+    return Math.min(Math.max(duration * 0.1, 0.25), 2);
+}
+
 function buildThumb(kind, src) {
     const resolved = displayMediaUrl(src) || src;
 
@@ -17,12 +23,15 @@ function buildThumb(kind, src) {
         video.className = 'media-thumb media-thumb--video';
         video.muted = true;
         video.playsInline = true;
-        video.preload = 'metadata';
+        video.preload = 'auto';
         video.setAttribute('aria-hidden', 'true');
         if (resolved) {
             video.src = resolved;
-            video.addEventListener('loadedmetadata', () => {
-                const seekTo = video.duration > 0.1 ? 0.05 : 0;
+            let posterSeekDone = false;
+            const seekToPoster = () => {
+                if (posterSeekDone) return;
+                posterSeekDone = true;
+                const seekTo = pickVideoPosterTime(video.duration);
                 const onSeeked = () => {
                     video.pause();
                     video.removeEventListener('seeked', onSeeked);
@@ -33,7 +42,8 @@ function buildThumb(kind, src) {
                 } catch {
                     video.pause();
                 }
-            }, { once: true });
+            };
+            video.addEventListener('loadeddata', seekToPoster, { once: true });
         }
         return video;
     }
@@ -158,9 +168,6 @@ export function renderMediaBlock(host, { kind, src, state = 'ready' }) {
         thumb.addEventListener('error', () => {
             markThumbLoadError(card, thumb, resolved);
         });
-        if (state === 'ready' && resolved && !resolved.startsWith('blob:')) {
-            markThumbLoadError(card, thumb, resolved);
-        }
     }
 
     bindCardActivation(card, () => {

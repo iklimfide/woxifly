@@ -94,11 +94,26 @@ create table if not exists public.conversation_members (
   primary key (conversation_id, user_id)
 );
 
+do $$ begin
+  if not exists (select 1 from pg_type where typname = 'message_content_type') then
+    create type public.message_content_type as enum ('text', 'image', 'video', 'audio');
+  end if;
+end $$;
+
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
   conversation_id uuid not null references public.conversations(id) on delete cascade,
   sender_id uuid not null references auth.users(id) on delete cascade,
-  body text not null check (char_length(body) between 1 and 2000),
+  sender_username text not null default 'Kullanıcı',
+  receiver_id uuid references auth.users(id) on delete set null,
+  receiver_username text,
+  body text not null default '' check (char_length(body) <= 2000),
+  content_type public.message_content_type not null default 'text',
+  media_url text,
+  r2_key text,
+  client_id text,
+  quote jsonb,
+  deleted_at timestamptz,
   created_at timestamptz not null default now()
 );
 

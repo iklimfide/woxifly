@@ -37,16 +37,22 @@ function extractMediaFromClipboard(event) {
 
     for (const item of clipboard.items || []) {
         if (item.kind !== 'file') continue;
+        const itemType = (item.type || '').toLowerCase();
+        if (!itemType.startsWith('image/') && !itemType.startsWith('video/')) continue;
+
         const file = item.getAsFile();
-        if (!file?.type) continue;
-        if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
-            return normalizePastedFile(file);
-        }
+        if (!file?.size) continue;
+
+        const typed = file.type
+            ? file
+            : new File([file], file.name || `paste.${itemType.split('/')[1] || 'png'}`, { type: itemType });
+        return normalizePastedFile(typed);
     }
 
     for (const file of clipboard.files || []) {
-        if (!file?.type) continue;
-        if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+        if (!file?.size) continue;
+        const type = (file.type || '').toLowerCase();
+        if (type.startsWith('image/') || type.startsWith('video/')) {
             return normalizePastedFile(file);
         }
     }

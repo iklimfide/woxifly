@@ -54,8 +54,9 @@ export async function refreshCloudAdminStatus() {
     try {
         await cloudFetch('access');
         isCloudAdmin = true;
-    } catch {
+    } catch (err) {
         isCloudAdmin = false;
+        console.warn('[bulut] erişim reddedildi:', err.message);
     }
 
     deps?.onAdminStatusChange?.(isCloudAdmin);
@@ -141,7 +142,7 @@ function renderMessages({ conversation, messages, prepend = false }) {
             row.className = 'cloud-msg' + (isDeleted ? ' cloud-msg--deleted' : '');
             row.innerHTML = `
                 <div class="cloud-msg__head">
-                    <strong>${escapeHtml(message.senderName)}</strong>
+                    <strong>${escapeHtml(message.senderName)}${message.receiverName ? ` → ${escapeHtml(message.receiverName)}` : ''}</strong>
                     <span>${escapeHtml(formatDateLabel(message.createdAt))}</span>
                 </div>
                 <div class="cloud-msg__body">${escapeHtml(formatMessageBody(message))}</div>
@@ -247,7 +248,10 @@ export async function openCloudPanel() {
     if (!isCloudAdmin) {
         const allowed = await refreshCloudAdminStatus();
         if (!allowed) {
-            deps?.showNotify?.('Bulut YP için yetkiniz yok.', { title: 'Erişim reddedildi', type: 'warning' });
+            deps?.showNotify?.(
+                'Bulut YP için yetkiniz yok. Vercel’de ADMIN_EMAILS veya MASTER_USER (giriş e-postanız) tanımlı olmalı; değişiklikten sonra yeniden deploy edin.',
+                { title: 'Erişim reddedildi', type: 'warning' }
+            );
             return;
         }
     }

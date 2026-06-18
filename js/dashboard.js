@@ -1287,7 +1287,7 @@ async function loadMessageHistory(conversationId) {
 
     const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, body, created_at, sender_id, content_type, media_url, r2_key, client_id, quote')
+        .select('id, body, created_at, sender_id, sender_username, receiver_id, receiver_username, content_type, media_url, r2_key, client_id, quote')
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: false })
         .limit(MESSAGE_HISTORY_LIMIT);
@@ -1303,7 +1303,7 @@ async function loadMessageHistory(conversationId) {
     }
 
     const ordered = [...messages].reverse();
-    const senderIds = [...new Set(ordered.map((m) => m.sender_id))];
+    const senderIds = [...new Set(ordered.filter((m) => !m.sender_username).map((m) => m.sender_id))];
     const { data: profiles } = await supabase
         .from('profiles')
         .select('id, username')
@@ -1326,7 +1326,7 @@ async function loadMessageHistory(conversationId) {
     if (loadId !== messageHistoryLoadId || conversationId !== currentConversationId) return;
 
     ordered.forEach((msg) => {
-        const senderName = profileMap[msg.sender_id] || 'Kullanıcı';
+        const senderName = msg.sender_username || profileMap[msg.sender_id] || 'Kullanıcı';
         const isOutgoing = msg.sender_id === currentUserId;
         container.appendChild(createMessageElement({
             sender: senderName,
