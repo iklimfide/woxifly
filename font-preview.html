@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Woxifly — Font önizleme</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&family=IBM+Plex+Sans:wght@400;600&family=Inter:opsz,wght@14..32,400;14..32,600&family=Nunito+Sans:ital,opsz,wght@0,6..12,400;0,6..12,600;1,6..12,400&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f4f6f9;
+            --card: #fff;
+            --border: #e2e8f0;
+            --accent: #2e8add;
+            --out-blue: #d9edff;
+            --text: #2d3748;
+            --muted: #718096;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 16px;
+            line-height: 1.45;
+        }
+
+        h1 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .intro {
+            font-size: 0.88rem;
+            color: var(--muted);
+            max-width: 520px;
+            margin-bottom: 20px;
+        }
+
+        .grid {
+            display: grid;
+            gap: 14px;
+            max-width: 430px;
+            margin: 0 auto;
+        }
+
+        .sample {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .sample-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .sample-name {
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        .sample-meta {
+            font-size: 0.72rem;
+            color: var(--muted);
+            text-align: right;
+        }
+
+        .sample-meta strong {
+            display: block;
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        .turkish {
+            font-size: 0.82rem;
+            color: var(--muted);
+            margin-bottom: 10px;
+        }
+
+        .bubbles {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .bubble {
+            max-width: 88%;
+            padding: 8px 10px;
+            border-radius: 12px;
+            font-size: 1rem;
+            line-height: 1.35;
+        }
+
+        .bubble.in {
+            align-self: flex-start;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-top-left-radius: 0;
+        }
+
+        .bubble.out {
+            align-self: flex-end;
+            background: var(--out-blue);
+            color: #1a3a5f;
+            border: 1px solid #b7dbf7;
+            border-top-right-radius: 0;
+        }
+
+        .bubble small {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 3px;
+        }
+
+        .bubble .time {
+            float: right;
+            font-size: 0.62rem;
+            color: var(--muted);
+            margin-left: 8px;
+            margin-top: 4px;
+        }
+
+        .f-system { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+        .f-inter { font-family: 'Inter', system-ui, sans-serif; }
+        .f-dm { font-family: 'DM Sans', system-ui, sans-serif; }
+        .f-source { font-family: 'Source Sans 3', system-ui, sans-serif; }
+        .f-nunito { font-family: 'Nunito Sans', system-ui, sans-serif; }
+        .f-plex { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+
+        .note {
+            max-width: 430px;
+            margin: 18px auto 0;
+            font-size: 0.8rem;
+            color: var(--muted);
+            padding: 12px;
+            background: #fff;
+            border-radius: 10px;
+            border: 1px dashed var(--border);
+        }
+    </style>
+</head>
+<body>
+    <h1>Woxifly font önizleme</h1>
+    <p class="intro">
+        Mesaj balonu metni <strong>1rem (16px)</strong> ile gösteriliyor.
+        Yeşil etiket = üretimde ek yük tahmini. Bu sayfa karşılaştırma içindir; siteye yalnızca seçtiğin tek font eklenir.
+    </p>
+
+    <div class="grid">
+        <section class="sample f-system">
+            <div class="sample-head">
+                <div class="sample-name">Segoe UI (şu an)</div>
+                <div class="sample-meta"><strong>0 KB</strong>sistem fontu</div>
+            </div>
+            <p class="turkish">Çğışöü İĞÜŞ — yakınındakiler, mesajlaşma</p>
+            <div class="bubbles">
+                <div class="bubble in">
+                    <small>Hazal</small>
+                    Merhaba! Bugün Kadıköy'de misin?
+                    <span class="time">14:32</span>
+                </div>
+                <div class="bubble out">
+                    Evet, birazdan çıkıyorum 🙂
+                    <span class="time">14:33</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="sample f-inter">
+            <div class="sample-head">
+                <div class="sample-name">Inter</div>
+                <div class="sample-meta"><strong>~18 KB</strong>woff2, 400+600</div>
+            </div>
+            <p class="turkish">Çğışöü İĞÜŞ — yakınındakiler, mesajlaşma</p>
+            <div class="bubbles">
+                <div class="bubble in">
+                    <small>Hazal</small>
+                    Merhaba! Bugün Kadıköy'de misin?
+                    <span class="time">14:32</span>
+                </div>
+                <div class="bubble out">
+                    Evet, birazdan çıkıyorum 🙂
+                    <span class="time">14:33</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="sample f-dm">
+            <div class="sample-head">
+                <div class="sample-name">DM Sans</div>
+                <div class="sample-meta"><strong>~20 KB</strong>woff2, 400+600</div>
+            </div>
+            <p class="turkish">Çğışöü İĞÜŞ — yakınındakiler, mesajlaşma</p>
+            <div class="bubbles">
+                <div class="bubble in">
+                    <small>Hazal</small>
+                    Merhaba! Bugün Kadıköy'de misin?
+                    <span class="time">14:32</span>
+                </div>
+                <div class="bubble out">
+                    Evet, birazdan çıkıyorum 🙂
+                    <span class="time">14:33</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="sample f-source">
+            <div class="sample-head">
+                <div class="sample-name">Source Sans 3</div>
+                <div class="sample-meta"><strong>~22 KB</strong>woff2, 400+600</div>
+            </div>
+            <p class="turkish">Çğışöü İĞÜŞ — yakınındakiler, mesajlaşma</p>
+            <div class="bubbles">
+                <div class="bubble in">
+                    <small>Hazal</small>
+                    Merhaba! Bugün Kadıköy'de misin?
+                    <span class="time">14:32</span>
+                </div>
+                <div class="bubble out">
+                    Evet, birazdan çıkıyorum 🙂
+                    <span class="time">14:33</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="sample f-nunito">
+            <div class="sample-head">
+                <div class="sample-name">Nunito Sans</div>
+                <div class="sample-meta"><strong>~24 KB</strong>woff2, 400+600</div>
+            </div>
+            <p class="turkish">Çğışöü İĞÜŞ — yakınındakiler, mesajlaşma</p>
+            <div class="bubbles">
+                <div class="bubble in">
+                    <small>Hazal</small>
+                    Merhaba! Bugün Kadıköy'de misin?
+                    <span class="time">14:32</span>
+                </div>
+                <div class="bubble out">
+                    Evet, birazdan çıkıyorum 🙂
+                    <span class="time">14:33</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="sample f-plex">
+            <div class="sample-head">
+                <div class="sample-name">IBM Plex Sans</div>
+                <div class="sample-meta"><strong>~26 KB</strong>woff2, 400+600</div>
+            </div>
+            <p class="turkish">Çğışöü İĞÜŞ — yakınındakiler, mesajlaşma</p>
+            <div class="bubbles">
+                <div class="bubble in">
+                    <small>Hazal</small>
+                    Merhaba! Bugün Kadıköy'de misin?
+                    <span class="time">14:32</span>
+                </div>
+                <div class="bubble out">
+                    Evet, birazdan çıkıyorum 🙂
+                    <span class="time">14:33</span>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <p class="note">
+        <strong>Hız ipuçları:</strong> Yalnızca 400 + 600 ağırlık, latin-ext alt kümesi, <code>font-display: swap</code>,
+        <code>preconnect</code> ve mümkünse self-hosted woff2. Sistem fontu (Segoe UI / San Francisco) her zaman en hızlısıdır.
+        Beğendiğini söyle — siteye tek font olarak entegre ederim.
+    </p>
+</body>
+</html>
