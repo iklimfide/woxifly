@@ -550,7 +550,7 @@
         .notification-action-btn:active { background: #f1f5f9; }
 
         .header-pp {
-            width: 40px; height: 40px; border-radius: 50%; border: 2px solid white; background-color: rgba(255, 255, 255, 0.2); color: white; font-weight: bold; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; overflow: hidden;
+            width: 40px; height: 40px; border-radius: 50%; border: 2px solid white; background-color: rgba(255, 255, 255, 0.2); color: white; font-weight: bold; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; overflow: hidden; padding: 0; font: inherit;
         }
 
         .header-pp img {
@@ -2798,7 +2798,7 @@
                 </div>
 
                 <div class="header-profile-wrapper">
-                    <div class="header-pp" id="headerProfilePic" onclick="toggleDropdown(event)">B</div>
+                    <button type="button" class="header-pp" id="headerProfilePic" aria-label="Profil menüsü" aria-haspopup="true">B</button>
                     <div class="profile-dropdown" id="profileDropdown"></div>
                 </div>
             </div>

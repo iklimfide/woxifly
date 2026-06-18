@@ -76,6 +76,19 @@ export function getPushInitReason() {
     return initReason;
 }
 
+function waitForServiceWorkerReady(timeoutMs = 8000) {
+    if (!navigator.serviceWorker?.ready) {
+        return Promise.resolve(null);
+    }
+
+    return Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('service_worker_ready_timeout')), timeoutMs);
+        })
+    ]);
+}
+
 export async function initPushNotifications() {
     const capability = detectBrowserCapability();
     pushSupported = capability.supported;
@@ -92,7 +105,7 @@ export async function initPushNotifications() {
                 scope: '/',
                 updateViaCache: 'none'
             });
-            await navigator.serviceWorker.ready;
+            await waitForServiceWorkerReady();
             swRegistration.update().catch(() => {});
 
             swRegistration.addEventListener('updatefound', () => {
@@ -126,7 +139,9 @@ export async function initPushNotifications() {
         } catch (err) {
             console.warn('Service worker kaydı başarısız:', err);
             swRegistration = null;
-            initReason = 'sw_register_failed';
+            initReason = err?.message === 'service_worker_ready_timeout'
+                ? 'sw_ready_timeout'
+                : 'sw_register_failed';
         }
     } else {
         initReason = 'no_service_worker';

@@ -273,6 +273,7 @@ function applyAvatarDisplay(element, url, fallbackLetter) {
         const img = document.createElement('img');
         img.src = src;
         img.alt = '';
+        img.draggable = false;
         element.appendChild(img);
     } else {
         element.textContent = (fallbackLetter || '?').charAt(0).toUpperCase();
@@ -588,6 +589,10 @@ window.onclick = function () {
 function initProfileDropdown() {
     document.getElementById('profileDropdown')?.addEventListener('click', (event) => {
         event.stopPropagation();
+    });
+
+    document.getElementById('headerProfilePic')?.addEventListener('click', (event) => {
+        toggleDropdown(event);
     });
 }
 
@@ -2607,6 +2612,13 @@ async function refreshSessionState() {
     }
 }
 
+function bootstrapAppUi() {
+    updateHeaderMenu();
+    updateMessageInputState();
+    updateDistrictGroupTab();
+    syncMenuToggleIcon();
+}
+
 async function initDashboard() {
     initSeo();
     initPasswordVisibilityToggles();
@@ -2652,8 +2664,11 @@ async function initDashboard() {
             }
         }
     });
-    await initPushNotifications();
-    updatePushStatusUI();
+    bootstrapAppUi();
+
+    const pushInitPromise = initPushNotifications()
+        .then(() => updatePushStatusUI())
+        .catch(() => updatePushStatusUI());
 
     const session = await getSession();
 
@@ -2669,12 +2684,11 @@ async function initDashboard() {
     } else {
         renderDmEmptyState();
         setNotificationUser(null);
-        updateHeaderMenu();
-        updateMessageInputState();
         maybeShowWelcomeModal();
     }
 
     updateDistrictGroupTab();
+    updateHeaderMenu();
 
     const route = parseAppRoute();
     if (route) {
@@ -2708,6 +2722,7 @@ async function initDashboard() {
     });
 
     syncMenuToggleIcon();
+    void pushInitPromise;
 }
 
 function triggerPushForMessage(conversationId) {
