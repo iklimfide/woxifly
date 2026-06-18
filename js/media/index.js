@@ -1,6 +1,23 @@
-export { MEDIA_BASE, toMediaUrl, toPersistMediaUrl, toBroadcastMediaUrl, displayMediaUrl, isValidMediaUrl, kindFromFile, isMediaKind } from './urls.js';
+export {
+    MEDIA_BASE,
+    toMediaUrl,
+    toPersistMediaUrl,
+    toBroadcastMediaUrl,
+    displayMediaUrl,
+    resolveMessageMediaUrl,
+    isValidMediaUrl,
+    kindFromFile,
+    isMediaKind
+} from './urls.js';
 export { uploadFile } from './upload.js';
 export { renderMediaBlock, updateMediaBlock, createMediaHost } from './render.js';
 export { initViewer, openViewer } from './viewer.js';
-export { initComposer, sendMediaFile, kindFromFile as fileKind } from './composer.js';
+export {
+    initMediaSendModal,
+    openMediaSendModal,
+    closeMediaSendModal,
+    isMediaSendModalOpen,
+    setMediaSendUploadState
+} from './send-modal.js';
+export { initComposer, sendMediaFile, uploadMediaFile, kindFromFile as fileKind } from './composer.js';
 export { compressImageForChat, compressImageForAvatar, compressImageFile } from './compress-image.js';

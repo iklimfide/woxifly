@@ -3,7 +3,22 @@ import { initAuthModal, openAuthModal } from './auth-modal.js';
 import { initWelcomeModal, maybeShowWelcomeModal, closeWelcomeModal } from './welcome-modal.js';
 import { initNotifyModal, showNotify, closeNotifyModal } from './notify-modal.js';
 import { initLinkViewer } from './link-viewer.js';
-import { initViewer, initComposer, sendMediaFile, isValidMediaUrl, toMediaUrl, toPersistMediaUrl, toBroadcastMediaUrl, displayMediaUrl } from './media/index.js';
+import {
+    initViewer,
+    initComposer,
+    uploadMediaFile,
+    isValidMediaUrl,
+    toMediaUrl,
+    toPersistMediaUrl,
+    toBroadcastMediaUrl,
+    displayMediaUrl,
+    resolveMessageMediaUrl,
+    initMediaSendModal,
+    openMediaSendModal,
+    closeMediaSendModal,
+    isMediaSendModalOpen,
+    setMediaSendUploadState
+} from './media/index.js';
 import { compressImageForAvatar, compressImageForChat } from './media/compress-image.js';
 import { getDistrictCoords, populateDistrictSelect, DEFAULT_DISTRICT, MESSAGE_HISTORY_LIMIT } from './config.js';
 import {
@@ -15,13 +30,7 @@ import {
     broadcastMessageDelete,
     updatePresenceTrack
 } from './realtime-chat.js';
-import {
-    sanitizeText,
-    isValidUsername,
-    createMessageElement,
-    formatTime,
-    formatQuotePreview
-} from './utils.js';
+import { sanitizeText, isValidUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles } from './utils.js';
 import {
     startVoiceRecording,
     stopVoiceRecording,
@@ -80,10 +89,17 @@ import {
     usernameToSlug,
     replaceAppPath
 } from './app-routes.js';
+import {
+    initHmCamouflage,
+    syncHmProfileUi,
+    readHmSettingsFromProfile
+} from './hm-camouflage.js';
+import { initSeo } from './seo.js';
 
 let currentUserId = null;
 let pendingForward = null;
 let pendingForwardSourceChat = null;
+let pendingComposerMedia = null;
 let currentMyDistrict = DEFAULT_DISTRICT;
 let currentMyUsername = 'Misafir';
 let currentMyIsVisible = false;
@@ -92,6 +108,10 @@ let currentMyAvatarR2Key = null;
 let currentActiveChat = null;
 let currentConversationId = null;
 let currentGroupDistrict = null;
+let radarOpenedFromHome = false;
+let profileReadyPromise = Promise.resolve();
+let radarSearchId = 0;
+let messageHistoryLoadId = 0;
 const dmConversations = new Map();
 const dmTitles = new Map();
 let mostRecentDmChat = null;
@@ -112,7 +132,7 @@ async function resolveUserBySlug(slug) {
 
     const { data: exact } = await supabase
         .from('profiles')
-        .select('id, username')
+        .select('id, username, avatar_url')
         .eq('username', slug)
         .maybeSingle();
 
@@ -120,7 +140,7 @@ async function resolveUserBySlug(slug) {
 
     const { data: rows } = await supabase
         .from('profiles')
-        .select('id, username')
+        .select('id, username, avatar_url')
         .ilike('username', slug);
 
     if (!rows?.length) return null;
@@ -128,7 +148,7 @@ async function resolveUserBySlug(slug) {
     return rows.find((profile) => usernameToSlug(profile.username) === target) || null;
 }
 
-async function openDmByUserId(userId, usernameHint = null) {
+async function openDmByUserId(userId, usernameHint = null, avatarUrl = null) {
     if (!isLoggedIn()) {
         await showChatListHome();
         promptLogin();
@@ -145,10 +165,11 @@ async function openDmByUserId(userId, usernameHint = null) {
     if (!username) {
         const { data } = await supabase
             .from('profiles')
-            .select('username')
+            .select('username, avatar_url')
             .eq('id', userId)
             .maybeSingle();
         username = data?.username;
+        if (!avatarUrl) avatarUrl = data?.avatar_url || null;
     }
 
     if (!username) {
@@ -170,7 +191,7 @@ async function openDmByUserId(userId, usernameHint = null) {
         }
     }
 
-    await openChat(`User-${userId}`, username, 'Özel Sohbet');
+    await openChat(`User-${userId}`, username, 'Özel Sohbet', { avatarUrl });
 }
 
 async function openDmByUsernameSlug(usernameSlug) {
@@ -186,7 +207,7 @@ async function openDmByUsernameSlug(usernameSlug) {
         return;
     }
 
-    await openDmByUserId(profile.id, profile.username);
+    await openDmByUserId(profile.id, profile.username, profile.avatar_url || null);
 }
 
 async function restoreAppRoute(route) {
@@ -258,6 +279,21 @@ function applyAvatarDisplay(element, url, fallbackLetter) {
     }
 }
 
+async function resolveDmPartnerAvatar(userId, avatarUrl = null) {
+    if (avatarUrl) return avatarUrl;
+
+    const sidebarImg = document.getElementById(`user-${userId}`)?.querySelector('.avatar img');
+    if (sidebarImg?.src) return sidebarImg.src;
+
+    const { data } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', userId)
+        .maybeSingle();
+
+    return data?.avatar_url || null;
+}
+
 function refreshAvatarDisplays() {
     const letter = isLoggedIn() ? currentMyUsername.charAt(0) : '?';
     applyAvatarDisplay(document.getElementById('headerProfilePic'), currentMyAvatarUrl, letter);
@@ -312,7 +348,7 @@ function promptEnableRadarVisibility() {
     if (settingsBtn) settingsBtn.hidden = false;
 
     showNotify(
-        'Yakınımdakileri bulmak için önce profilden "Yakınımdakiler aramasında görünür ol" ayarını açmanız gerekiyor.',
+        'Yakınımdakileri bul özelliğini kullanabilmek için profilden "Yakınımdakiler aramasında görünür ol" ayarını açmanız gerekiyor.',
         { title: 'Ayar gerekli', type: 'warning' }
     );
 
@@ -500,22 +536,42 @@ function updateHeaderMenu() {
 }
 
 function isMobileLayout() {
-    return window.matchMedia('(max-width: 767px)').matches;
+    return true;
+}
+
+function syncMenuToggleIcon() {
+    const btn = document.querySelector('.menu-toggle');
+    const sidebar = document.getElementById('sidebar');
+    if (!btn || !sidebar) return;
+
+    const isOpen = sidebar.classList.contains('open');
+    btn.textContent = isOpen ? '×' : '☰';
+    btn.setAttribute('aria-label', isOpen ? 'Menüyü kapat' : 'Menüyü aç');
 }
 
 window.toggleSidebar = function () {
-    if (isMobileLayout() && document.body.classList.contains('chat-open-view')) {
-        showChatListHome();
+    if (document.body.classList.contains('chats-home-view')) {
         return;
     }
 
-    document.getElementById('sidebar').classList.add('open');
-    document.getElementById('sidebarOverlay').classList.add('show');
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const isOpen = sidebar.classList.contains('open');
+
+    if (isOpen) {
+        closeSidebar();
+        return;
+    }
+
+    sidebar.classList.add('open');
+    overlay.classList.add('show');
+    syncMenuToggleIcon();
 };
 
 window.closeSidebar = function () {
-    document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('sidebarOverlay').classList.remove('show');
+    document.getElementById('sidebar')?.classList.remove('open');
+    document.getElementById('sidebarOverlay')?.classList.remove('show');
+    syncMenuToggleIcon();
 };
 
 window.toggleDropdown = function (event) {
@@ -525,14 +581,31 @@ window.toggleDropdown = function (event) {
 };
 
 window.onclick = function () {
-    document.getElementById('profileDropdown').classList.remove('show');
+    document.getElementById('profileDropdown')?.classList.remove('show');
     closeNotificationDropdown();
 };
+
+function initProfileDropdown() {
+    document.getElementById('profileDropdown')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+    });
+}
+
+function showMainContentView() {
+    clearRadarMobileView();
+    document.body.classList.remove('chats-home-view');
+    document.body.classList.add('chat-open-view');
+    closeSidebar();
+}
 
 window.switchView = function (panelId) {
     if (panelId === 'profile-panel' && !isLoggedIn()) {
         promptLogin();
         return;
+    }
+
+    if (panelId === 'profile-panel') {
+        showMainContentView();
     }
 
     document.querySelectorAll('.view-panel').forEach((p) => p.classList.remove('active'));
@@ -541,6 +614,7 @@ window.switchView = function (panelId) {
     document.getElementById('headerTitleProfile').style.display = panelId === 'profile-panel' ? 'block' : 'none';
     if (panelId === 'profile-panel') {
         updatePushStatusUI();
+        syncHmProfileUi();
     }
     document.getElementById('profileDropdown').classList.remove('show');
     closeNotificationDropdown();
@@ -555,6 +629,26 @@ window.checkEnter = function (event) {
     if (event.key === 'Enter') sendMessage();
 };
 
+function restoreRadarMobileHomeView() {
+    if (!radarOpenedFromHome) return;
+    radarOpenedFromHome = false;
+    document.body.classList.remove('radar-open-view');
+    document.body.classList.add('chats-home-view');
+}
+
+function clearRadarMobileView() {
+    radarOpenedFromHome = false;
+    document.body.classList.remove('radar-open-view');
+    document.getElementById('radarPanel')?.classList.remove('open');
+}
+
+function openRadarMobileFromHome() {
+    if (!isMobileLayout() || !document.body.classList.contains('chats-home-view')) return;
+    radarOpenedFromHome = true;
+    document.body.classList.remove('chats-home-view');
+    document.body.classList.add('radar-open-view');
+}
+
 window.toggleRadarPanel = function () {
     if (!isLoggedIn()) {
         promptLogin();
@@ -563,11 +657,25 @@ window.toggleRadarPanel = function () {
 
     if (!requireRadarVisibility()) return;
 
-    if (isMobileLayout()) closeSidebar();
-
     const panel = document.getElementById('radarPanel');
+    const willOpen = !panel.classList.contains('open');
+
+    if (willOpen) {
+        if (isMobileLayout()) {
+            openRadarMobileFromHome();
+            closeSidebar();
+        }
+    } else {
+        restoreRadarMobileHomeView();
+    }
+
     panel.classList.toggle('open');
     if (panel.classList.contains('open')) searchRadar(10);
+};
+
+window.closeRadarPanel = function () {
+    document.getElementById('radarPanel')?.classList.remove('open');
+    restoreRadarMobileHomeView();
 };
 
 window.saveProfile = saveProfile;
@@ -661,8 +769,7 @@ function updateHeaderForChatHome() {
 }
 
 function showChatConversationUi() {
-    document.body.classList.remove('chats-home-view');
-    document.body.classList.add('chat-open-view');
+    showMainContentView();
 
     const container = document.getElementById('messageContainer');
     const input = document.getElementById('messageInputArea');
@@ -675,9 +782,11 @@ async function showChatListHome() {
     currentConversationId = null;
     leaveRealtimeRoom();
     clearPendingQuote();
+    clearPendingComposerMedia();
     clearPendingForward();
     exitSelectionMode(document.getElementById('messageContainer'));
     updateSelectionBarUi(0);
+    clearMessageContainer();
 
     document.body.classList.add('chats-home-view');
     document.body.classList.remove('chat-open-view');
@@ -692,29 +801,38 @@ async function showChatListHome() {
 
     switchView('chat-panel');
     closeSidebar();
+    syncMenuToggleIcon();
     updateDistrictGroupTab();
     updateMessageInputState();
     saveAppRoute();
 }
 
-async function fetchDistrictCoordinates(district) {
-    const { data, error } = await supabase
-        .from('district_coordinates')
-        .select('latitude, longitude')
-        .eq('district', district)
-        .maybeSingle();
+function withTimeout(promise, ms, message) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            setTimeout(() => reject(new Error(message)), ms);
+        })
+    ]);
+}
 
-    if (!error && data) {
-        return { lat: data.latitude, lon: data.longitude };
-    }
+function callLegacyNearbyUsers(maxKm) {
+    const coords = getDistrictCoords(currentMyDistrict || DEFAULT_DISTRICT);
+    return supabase.rpc('get_nearby_users', {
+        my_lat: coords.lat,
+        my_lon: coords.lon,
+        max_dist_km: maxKm
+    });
+}
 
-    return getDistrictCoords(district);
+async function fetchNearbyUsers(maxKm) {
+    return callLegacyNearbyUsers(maxKm);
 }
 
 async function loadProfile() {
     const { data, error } = await supabase
         .from('profiles')
-        .select('username, district, current_district, is_visible, lat, lon, avatar_url, avatar_r2_key')
+        .select('username, district, current_district, is_visible, avatar_url, avatar_r2_key')
         .eq('id', currentUserId)
         .single();
 
@@ -738,15 +856,6 @@ async function loadProfile() {
         currentMyIsVisible = data.is_visible === true;
         currentMyAvatarUrl = data.avatar_url || null;
         currentMyAvatarR2Key = data.avatar_r2_key || null;
-
-        if (data.lat == null || data.lon == null) {
-            const coords = await fetchDistrictCoordinates(currentMyDistrict);
-            await supabase.from('profiles').update({
-                lat: coords.lat,
-                lon: coords.lon,
-                updated_at: new Date().toISOString()
-            }).eq('id', currentUserId);
-        }
     }
 
     document.getElementById('usernameInput').value = currentMyUsername;
@@ -778,6 +887,14 @@ async function saveProfile() {
         return;
     }
 
+    const hmEnabled = document.getElementById('hmPerdeInput')?.checked === true;
+    const hmPinInput = document.getElementById('hmPinInput');
+    const hmPin = hmPinInput?.value?.trim();
+    if (hmEnabled && hmPin && !/^\d{4,8}$/.test(hmPin)) {
+        showNotify('Kilit PIN 4-8 haneli rakam olmalıdır.', { title: 'Geçersiz PIN', type: 'warning' });
+        return;
+    }
+
     const { error } = await supabase.from('profiles').update({
         username: newName,
         district: newDistrict,
@@ -789,6 +906,11 @@ async function saveProfile() {
     if (error) {
         showNotify('Profil kaydedilemedi: ' + error.message, { title: 'Hata', type: 'error' });
         return;
+    }
+
+    const hmResult = readHmSettingsFromProfile();
+    if (hmResult?.error) {
+        showNotify(hmResult.error, { title: 'Geçersiz PIN', type: 'warning' });
     }
 
     currentMyDistrict = newDistrict;
@@ -852,8 +974,7 @@ function appendMessageToUI({
     reactions = null
 }) {
     const container = document.getElementById('messageContainer');
-    const placeholder = container.querySelector('div[data-empty-chat]');
-    if (placeholder) placeholder.remove();
+    clearMessagePlaceholders(container);
 
     container.appendChild(createMessageElement({
         sender,
@@ -870,6 +991,7 @@ function appendMessageToUI({
         reactions,
         onSenderClick: isOutgoing ? null : messageClickHandler(),
         showSender: shouldShowMessageSender(),
+        showQuoteAuthor: shouldShowMessageSender(),
         viewerUserId: currentUserId,
         viewerUsername: currentMyUsername
     }));
@@ -879,7 +1001,26 @@ function appendMessageToUI({
     }
 }
 
+let finishVoiceRecordingToPending = async () => {};
+
 function initMediaComposer() {
+    initMediaSendModal({
+        onSend: async (caption) => {
+            try {
+                await dispatchPendingComposerMedia(caption);
+            } catch (err) {
+                showNotify(err.message || 'Mesaj gönderilemedi.', {
+                    title: 'Gönderim hatası',
+                    type: 'error'
+                });
+                throw err;
+            }
+        },
+        onCancel: () => {
+            clearPendingComposerMedia();
+        }
+    });
+
     initComposer({
         isLoggedIn,
         promptLogin,
@@ -894,49 +1035,62 @@ function initMediaComposer() {
         return;
     }
 
-    let releaseListener = null;
-    let pendingFinish = false;
-    let finishing = false;
-
-    const unbindReleaseListener = () => {
-        if (!releaseListener) return;
-        document.removeEventListener('mouseup', releaseListener);
-        document.removeEventListener('touchend', releaseListener);
-        document.removeEventListener('pointerup', releaseListener);
-        document.removeEventListener('pointercancel', releaseListener);
-        releaseListener = null;
-    };
-
-    const bindReleaseListener = () => {
-        unbindReleaseListener();
-        releaseListener = (event) => {
-            if (event.target?.closest?.('#voiceRecordingCancel')) return;
-            finishRecord(event);
-        };
-        document.addEventListener('mouseup', releaseListener);
-        document.addEventListener('touchend', releaseListener, { passive: false });
-        document.addEventListener('pointerup', releaseListener);
-        document.addEventListener('pointercancel', releaseListener);
-    };
+    let voiceRecordingFinishing = false;
 
     const resetRecordingUi = () => {
-        unbindReleaseListener();
-        pendingFinish = false;
-        finishing = false;
+        voiceRecordingFinishing = false;
         stopRecordingUi();
         hideVoiceRecordingPanel();
         voiceBtn.classList.remove('recording');
     };
 
-    const beginRecord = (event) => {
-        event.preventDefault();
+    const stopRecordingToPending = () => new Promise((resolve) => {
+        if (voiceRecordingFinishing) {
+            resolve();
+            return;
+        }
+
+        if (!isRecording()) {
+            resolve();
+            return;
+        }
+
+        voiceRecordingFinishing = true;
+        stopRecordingUi();
+        hideVoiceRecordingPanel();
+        voiceBtn.classList.remove('recording');
+
+        const stopped = stopVoiceRecording(async (blob) => {
+            voiceRecordingFinishing = false;
+
+            if (!blob || blob.size < 1) {
+                showNotify('Ses kaydı çok kısa.', { title: 'Ses kaydı', type: 'warning' });
+                resolve();
+                return;
+            }
+
+            const mimeType = normalizeAudioMimeType(blob.type);
+            const ext = audioExtensionForMime(mimeType);
+            const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mimeType });
+            await stageComposerMedia(file, 'audio');
+            resolve();
+        });
+
+        if (!stopped) {
+            voiceRecordingFinishing = false;
+            resolve();
+        }
+    });
+
+    finishVoiceRecordingToPending = stopRecordingToPending;
+
+    const beginRecord = () => {
         if (!isLoggedIn()) {
             promptLogin();
             return;
         }
-        if (isRecording() || finishing) return;
+        if (isRecording() || voiceRecordingFinishing) return;
 
-        pendingFinish = false;
         voiceBtn.classList.add('recording');
         showVoiceRecordingPanel();
 
@@ -946,13 +1100,9 @@ function initMediaComposer() {
                     getElapsedMs: getRecordingElapsedMs,
                     analyser
                 });
-                bindReleaseListener();
-                if (pendingFinish) {
-                    finishRecord();
-                }
             },
             onMaxDuration: () => {
-                finishRecord();
+                stopRecordingToPending();
             },
             onError: (err) => {
                 resetRecordingUi();
@@ -971,7 +1121,7 @@ function initMediaComposer() {
     const cancelRecord = (event) => {
         event?.preventDefault?.();
         event?.stopPropagation?.();
-        if (!isRecording() && !finishing) {
+        if (!isRecording() && !voiceRecordingFinishing) {
             resetRecordingUi();
             return;
         }
@@ -979,50 +1129,16 @@ function initMediaComposer() {
         resetRecordingUi();
     };
 
-    const finishRecord = async (event) => {
-        event?.preventDefault?.();
-
-        if (finishing) return;
-
-        if (!isRecording()) {
-            pendingFinish = true;
-            return;
-        }
-
-        finishing = true;
-        unbindReleaseListener();
-        stopRecordingUi();
-        hideVoiceRecordingPanel();
-        voiceBtn.classList.remove('recording');
-
-        const stopped = stopVoiceRecording(async (blob) => {
-            finishing = false;
-            pendingFinish = false;
-
-            if (!blob || blob.size < 1) {
-                showNotify('Ses kaydı alınamadı. Biraz daha uzun basılı tutun.', {
-                    title: 'Ses kaydı',
-                    type: 'warning'
-                });
-                return;
-            }
-
-            const mimeType = normalizeAudioMimeType(blob.type);
-            const ext = audioExtensionForMime(mimeType);
-            const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mimeType });
-            await handleMediaMessage(file, 'audio');
-        });
-
-        if (!stopped) {
-            finishing = false;
-            pendingFinish = false;
-        }
-    };
-
     document.getElementById('voiceRecordingCancel')?.addEventListener('click', cancelRecord);
 
-    voiceBtn.addEventListener('mousedown', beginRecord);
-    voiceBtn.addEventListener('touchstart', beginRecord, { passive: false });
+    voiceBtn.addEventListener('click', async (event) => {
+        event.preventDefault();
+        if (isRecording()) {
+            await stopRecordingToPending();
+        } else {
+            beginRecord();
+        }
+    });
 }
 
 async function handleMediaMessage(file, kind) {
@@ -1031,67 +1147,57 @@ async function handleMediaMessage(file, kind) {
         return;
     }
 
-    const clientId = crypto.randomUUID();
-    const createdAt = new Date().toISOString();
-    const input = document.getElementById('messageInput');
-    const caption = sanitizeText(input?.value || '', 2000);
-    if (input) input.value = '';
-    const quote = getPendingQuote();
-    clearPendingQuote();
+    await stageComposerMedia(file, kind);
+}
 
-    let uploadFile = file;
-    if (kind === 'image') {
-        try {
-            uploadFile = await compressImageForChat(file);
-        } catch (err) {
-            showNotify(err.message || 'Görsel işlenemedi.', {
-                title: 'Yükleme hatası',
-                type: 'error'
-            });
-            return;
-        }
-    }
+function clearMessagePlaceholders(container = document.getElementById('messageContainer')) {
+    if (!container) return;
+    container.querySelector('[data-empty-chat]')?.remove();
+    container.querySelector('[data-message-loading]')?.remove();
+}
 
-    const localPreview = (kind === 'image' || kind === 'video' || kind === 'audio')
-        ? URL.createObjectURL(uploadFile)
-        : null;
+function clearMessageContainer(container = document.getElementById('messageContainer')) {
+    if (!container) return;
+    container.querySelectorAll('.message').forEach((el) => el.remove());
+    clearMessagePlaceholders(container);
+}
 
-    appendMessageToUI({
-        sender: currentMyUsername,
-        body: caption,
-        time: formatTime(createdAt),
-        isOutgoing: true,
-        contentType: kind,
-        mediaUrl: localPreview,
-        mediaState: 'pending',
-        clientId,
-        quote: serializeQuote(quote)
-    });
+function showMessageLoading() {
+    const container = document.getElementById('messageContainer');
+    if (!container) return;
 
-    await sendMediaFile(uploadFile, {
-        kind,
-        caption,
-        clientId,
-        onDeliver: (payload) => dispatchOutgoingMessage({
-            body: payload.caption,
-            contentType: payload.kind,
-            mediaUrl: payload.url,
-            r2Key: payload.r2Key,
-            clientId: payload.clientId,
-            skipAppend: true,
-            quote
-        })
-    }).catch((err) => {
-        showNotify(err.message || 'Medya gönderilemedi.', {
-            title: 'Yükleme hatası',
-            type: 'error'
-        });
-    });
+    clearMessagePlaceholders(container);
+
+    const wrap = document.createElement('div');
+    wrap.dataset.messageLoading = 'true';
+    wrap.className = 'message-loading';
+    wrap.setAttribute('aria-label', 'Mesajlar yükleniyor');
+    wrap.setAttribute('role', 'status');
+    wrap.innerHTML = `
+        <div class="message-loading-row message-loading-row--incoming">
+            <div class="message-loading-bubble">
+                <div class="message-loading-line"></div>
+                <div class="message-loading-line message-loading-line--short"></div>
+            </div>
+        </div>
+        <div class="message-loading-row message-loading-row--outgoing">
+            <div class="message-loading-bubble">
+                <div class="message-loading-line message-loading-line--mid"></div>
+            </div>
+        </div>
+        <div class="message-loading-row message-loading-row--incoming">
+            <div class="message-loading-bubble">
+                <div class="message-loading-line message-loading-line--mid"></div>
+            </div>
+        </div>
+    `;
+    container.appendChild(wrap);
 }
 
 function showEmptyChat() {
     const container = document.getElementById('messageContainer');
-    container.innerHTML = '';
+    clearMessagePlaceholders(container);
+
     const empty = document.createElement('div');
     empty.dataset.emptyChat = 'true';
     empty.style.cssText = 'text-align:center; font-size:0.8rem; color:var(--text-muted); padding:20px;';
@@ -1105,7 +1211,7 @@ function handleIncomingBroadcast(payload) {
     if (payload.sender_id && payload.sender_id === currentUserId) return;
 
     const contentType = payload.content_type || 'text';
-    const mediaUrl = toMediaUrl(payload.media_url);
+    const mediaUrl = resolveMessageMediaUrl(payload.media_url, payload.r2_key);
 
     if (contentType !== 'text' && !mediaUrl) return;
 
@@ -1194,17 +1300,22 @@ function subscribeDmRealtime(conversationId) {
 }
 
 async function loadMessageHistory(conversationId) {
+    const loadId = ++messageHistoryLoadId;
+    const container = document.getElementById('messageContainer');
+    clearMessageContainer(container);
+    showMessageLoading();
+
     const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, body, created_at, sender_id, content_type, media_url, client_id, quote')
+        .select('id, body, created_at, sender_id, content_type, media_url, r2_key, client_id, quote')
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: false })
         .limit(MESSAGE_HISTORY_LIMIT);
 
+    if (loadId !== messageHistoryLoadId || conversationId !== currentConversationId) return;
     if (error) throw error;
 
-    const container = document.getElementById('messageContainer');
-    container.innerHTML = '';
+    clearMessagePlaceholders(container);
 
     if (!messages || messages.length === 0) {
         showEmptyChat();
@@ -1218,6 +1329,8 @@ async function loadMessageHistory(conversationId) {
         .select('id, username')
         .in('id', senderIds);
 
+    if (loadId !== messageHistoryLoadId || conversationId !== currentConversationId) return;
+
     const profileMap = Object.fromEntries((profiles || []).map((p) => [p.id, p.username]));
 
     const messageIds = ordered.map((m) => m.id);
@@ -1230,6 +1343,8 @@ async function loadMessageHistory(conversationId) {
         reactionsByMessage = aggregateReactions(reactionRows || [], currentUserId);
     }
 
+    if (loadId !== messageHistoryLoadId || conversationId !== currentConversationId) return;
+
     ordered.forEach((msg) => {
         const senderName = profileMap[msg.sender_id] || 'Kullanıcı';
         const isOutgoing = msg.sender_id === currentUserId;
@@ -1240,13 +1355,15 @@ async function loadMessageHistory(conversationId) {
             isOutgoing,
             senderId: isOutgoing ? null : msg.sender_id,
             contentType: msg.content_type || 'text',
-            mediaUrl: toMediaUrl(msg.media_url),
+            mediaUrl: resolveMessageMediaUrl(msg.media_url, msg.r2_key),
+            mediaR2Key: msg.r2_key,
             messageId: msg.id,
             clientId: msg.client_id || null,
             quote: msg.quote || null,
             reactions: reactionsMapToList(reactionsByMessage.get(msg.id)),
             onSenderClick: isOutgoing ? null : messageClickHandler(),
             showSender: shouldShowMessageSender(),
+            showQuoteAuthor: shouldShowMessageSender(),
             viewerUserId: currentUserId,
             viewerUsername: currentMyUsername
         }));
@@ -1371,16 +1488,18 @@ function initMessageSelectionControls() {
     });
 }
 
-async function loadGroupMessageHistory(district) {
+async function loadGroupMessageHistory(district, convId) {
     try {
-        const convId = await getGroupConversationId(district);
-        currentConversationId = convId;
+        if (currentActiveChat !== `Group-${district}`) return;
         if (!convId) {
+            clearMessageContainer();
             showEmptyChat();
             return;
         }
         await loadMessageHistory(convId);
     } catch {
+        if (currentActiveChat !== `Group-${district}`) return;
+        clearMessageContainer();
         showEmptyChat();
     }
 }
@@ -1468,6 +1587,7 @@ async function dispatchOutgoingMessage({
         body: caption,
         content_type: hasMedia ? contentType : 'text',
         media_url: hasMedia ? toBroadcastMediaUrl(mediaUrl) : null,
+        r2_key: hasMedia ? r2Key : null,
         sender_id: currentUserId,
         sender_name: currentMyUsername,
         created_at: createdAt,
@@ -1482,7 +1602,8 @@ async function dispatchOutgoingMessage({
             time: formatTime(createdAt),
             isOutgoing: true,
             contentType: payload.content_type,
-            mediaUrl: toMediaUrl(payload.media_url),
+            mediaUrl: resolveMessageMediaUrl(payload.media_url, r2Key),
+            mediaR2Key: r2Key,
             mediaState: hasMedia ? 'ready' : 'ready',
             clientId: messageClientId,
             quote: serializedQuote
@@ -1500,6 +1621,229 @@ async function dispatchOutgoingMessage({
         r2Key,
         clientId: messageClientId,
         quote
+    });
+}
+
+function usesMediaSendModal(kind) {
+    return kind === 'video' || kind === 'audio';
+}
+
+async function dispatchPendingComposerMedia(caption = '') {
+    const ready = await ensurePendingMediaReady();
+    const quote = getPendingQuote();
+    clearPendingQuote();
+
+    await dispatchOutgoingMessage({
+        body: sanitizeText(caption, 2000),
+        contentType: ready.kind,
+        mediaUrl: ready.url,
+        r2Key: ready.r2Key,
+        quote
+    });
+
+    clearPendingComposerMedia();
+}
+
+function clearPendingComposerMedia() {
+    closeMediaSendModal();
+    if (pendingComposerMedia?.previewUrl) {
+        URL.revokeObjectURL(pendingComposerMedia.previewUrl);
+    }
+    pendingComposerMedia = null;
+    const slot = document.getElementById('mediaComposerSlot');
+    if (slot) slot.replaceChildren();
+    const bar = document.getElementById('uploadStatus');
+    if (bar) {
+        bar.hidden = true;
+        bar.classList.remove('is-active');
+        bar.textContent = '';
+    }
+}
+
+function mediaComposerLabel(kind, uploadState) {
+    const base = kind === 'image' ? '📷 Görsel'
+        : kind === 'video' ? '🎬 Video'
+            : '🎤 Ses kaydı';
+    if (uploadState === 'uploading') return `${base} · yükleniyor…`;
+    if (uploadState === 'failed') return `${base} · yükleme başarısız`;
+    return base;
+}
+
+function renderMediaComposerBar() {
+    const slot = document.getElementById('mediaComposerSlot');
+    if (!slot) return;
+
+    slot.replaceChildren();
+    if (!pendingComposerMedia || usesMediaSendModal(pendingComposerMedia.kind)) return;
+
+    const { kind, previewUrl, uploadState } = pendingComposerMedia;
+
+    const bar = document.createElement('div');
+    bar.className = 'quote-composer-bar';
+
+    const accent = document.createElement('div');
+    accent.className = 'quote-composer-accent';
+
+    const content = document.createElement('div');
+    content.className = 'quote-composer-content';
+    content.style.display = 'flex';
+    content.style.alignItems = 'center';
+    content.style.gap = '8px';
+
+    if (kind === 'image' && previewUrl) {
+        const thumb = document.createElement('img');
+        thumb.className = 'media-composer-thumb';
+        thumb.src = previewUrl;
+        thumb.alt = '';
+        content.appendChild(thumb);
+    } else if (kind === 'video') {
+        const thumb = document.createElement('div');
+        thumb.className = 'media-composer-thumb media-composer-thumb--icon';
+        thumb.textContent = '🎬';
+        content.appendChild(thumb);
+    } else {
+        const thumb = document.createElement('div');
+        thumb.className = 'media-composer-thumb media-composer-thumb--icon';
+        thumb.textContent = '🎤';
+        content.appendChild(thumb);
+    }
+
+    const textWrap = document.createElement('div');
+    textWrap.style.minWidth = '0';
+
+    const title = document.createElement('div');
+    title.className = 'quote-composer-preview';
+    title.textContent = mediaComposerLabel(kind, uploadState);
+
+    textWrap.appendChild(title);
+    content.appendChild(textWrap);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'quote-composer-close';
+    closeBtn.setAttribute('aria-label', 'Medyayı kaldır');
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', () => clearPendingComposerMedia());
+
+    bar.append(accent, content, closeBtn);
+    slot.appendChild(bar);
+}
+
+async function startPendingMediaUpload() {
+    if (!pendingComposerMedia || pendingComposerMedia.uploadState === 'ready') return;
+    if (pendingComposerMedia.uploadPromise) return pendingComposerMedia.uploadPromise;
+
+    const { file, kind } = pendingComposerMedia;
+    pendingComposerMedia.uploadState = 'uploading';
+    renderMediaComposerBar();
+    if (usesMediaSendModal(kind)) {
+        setMediaSendUploadState('uploading');
+    }
+
+    const bar = document.getElementById('uploadStatus');
+    if (bar) {
+        bar.hidden = false;
+        bar.classList.add('is-active');
+        bar.textContent = 'Medya yükleniyor...';
+    }
+
+    pendingComposerMedia.uploadPromise = uploadMediaFile(file, kind)
+        .then((result) => {
+            if (!pendingComposerMedia) return result;
+            pendingComposerMedia.url = result.url;
+            pendingComposerMedia.r2Key = result.r2Key;
+            pendingComposerMedia.kind = result.kind;
+            pendingComposerMedia.uploadState = 'ready';
+            renderMediaComposerBar();
+            if (usesMediaSendModal(pendingComposerMedia.kind)) {
+                setMediaSendUploadState('ready');
+            }
+            return result;
+        })
+        .catch((err) => {
+            if (pendingComposerMedia) {
+                pendingComposerMedia.uploadState = 'failed';
+                renderMediaComposerBar();
+                if (usesMediaSendModal(pendingComposerMedia.kind)) {
+                    setMediaSendUploadState('failed');
+                }
+            }
+            throw err;
+        })
+        .finally(() => {
+            const statusBar = document.getElementById('uploadStatus');
+            if (statusBar) {
+                statusBar.hidden = true;
+                statusBar.classList.remove('is-active');
+                statusBar.textContent = '';
+            }
+            if (pendingComposerMedia) {
+                pendingComposerMedia.uploadPromise = null;
+            }
+        });
+
+    return pendingComposerMedia.uploadPromise;
+}
+
+async function ensurePendingMediaReady() {
+    if (!pendingComposerMedia) return null;
+    if (pendingComposerMedia.uploadState === 'ready') {
+        return pendingComposerMedia;
+    }
+    if (pendingComposerMedia.uploadState === 'failed') {
+        pendingComposerMedia.uploadState = 'idle';
+        pendingComposerMedia.uploadPromise = null;
+    }
+    await startPendingMediaUpload();
+    if (pendingComposerMedia?.uploadState !== 'ready') {
+        throw new Error('Medya yüklenemedi. Tekrar deneyin.');
+    }
+    return pendingComposerMedia;
+}
+
+async function stageComposerMedia(file, kind) {
+    let uploadFile = file;
+    if (kind === 'image') {
+        try {
+            uploadFile = await compressImageForChat(file);
+        } catch (err) {
+            showNotify(err.message || 'Görsel işlenemedi.', {
+                title: 'Yükleme hatası',
+                type: 'error'
+            });
+            return;
+        }
+    }
+
+    clearPendingComposerMedia();
+
+    const previewUrl = (kind === 'image' || kind === 'video' || kind === 'audio')
+        ? URL.createObjectURL(uploadFile)
+        : null;
+
+    pendingComposerMedia = {
+        file: uploadFile,
+        kind,
+        previewUrl,
+        url: null,
+        r2Key: null,
+        uploadState: 'idle',
+        uploadPromise: null
+    };
+
+    const input = document.getElementById('messageInput');
+    const draftCaption = sanitizeText(input?.value || '', 2000);
+
+    if (usesMediaSendModal(kind)) {
+        openMediaSendModal({ kind, previewUrl, caption: draftCaption });
+        if (input) input.value = '';
+    } else {
+        renderMediaComposerBar();
+        input?.focus();
+    }
+
+    startPendingMediaUpload().catch(() => {
+        showNotify('Medya yüklenemedi.', { title: 'Yükleme hatası', type: 'error' });
     });
 }
 
@@ -1563,7 +1907,7 @@ function handleForwardRequest(payload) {
         const sidebar = document.getElementById('sidebar');
         const overlay = document.getElementById('sidebarOverlay');
         sidebar?.classList.add('open');
-        overlay?.classList.add('open');
+        overlay?.classList.add('show');
     }
 }
 
@@ -1586,12 +1930,15 @@ async function deliverPendingForward() {
     showNotify('Mesaj iletildi.', { title: 'İlet', type: 'success' });
 }
 
-async function openChat(chatId, title, status) {
+async function openChat(chatId, title, status, { avatarUrl = null } = {}) {
     showChatConversationUi();
+    messageHistoryLoadId += 1;
+    clearMessageContainer();
     currentActiveChat = chatId;
     const senderId = chatId.startsWith('User-') ? chatId.replace('User-', '') : null;
     markNotificationsReadForChat(chatId, senderId);
     clearPendingQuote();
+    clearPendingComposerMedia();
     exitSelectionMode(document.getElementById('messageContainer'));
     updateSelectionBarUi(0);
     switchView('chat-panel');
@@ -1599,14 +1946,19 @@ async function openChat(chatId, title, status) {
 
     document.getElementById('activeChatName').textContent = title;
     const statusEl = document.getElementById('activeChatStatus');
+    const activeChatAvatar = document.getElementById('activeChatAvatar');
+
     if (chatId.startsWith('User-')) {
         statusEl.textContent = '';
         statusEl.style.display = 'none';
+        const userId = chatId.replace('User-', '');
+        const partnerAvatar = await resolveDmPartnerAvatar(userId, avatarUrl);
+        applyAvatarDisplay(activeChatAvatar, partnerAvatar, title);
     } else {
         statusEl.style.display = '';
         statusEl.textContent = status;
+        applyAvatarDisplay(activeChatAvatar, null, title);
     }
-    document.getElementById('activeChatAvatar').textContent = title.charAt(0).toUpperCase();
 
     document.querySelectorAll('.chat-item').forEach((item) => item.classList.remove('active'));
 
@@ -1615,9 +1967,11 @@ async function openChat(chatId, title, status) {
         if (tab) tab.classList.add('active');
         const district = chatId.replace('Group-', '');
 
-        showEmptyChat();
         subscribeGroupRealtime(district);
-        await loadGroupMessageHistory(district);
+        const convId = await getGroupConversationId(district);
+        if (currentActiveChat !== chatId) return;
+        currentConversationId = convId;
+        await loadGroupMessageHistory(district, convId);
     } else if (chatId.startsWith('User-')) {
         if (!isLoggedIn()) {
             promptLogin();
@@ -1631,12 +1985,12 @@ async function openChat(chatId, title, status) {
         currentConversationId = dmConversations.get(userId);
 
         if (!currentConversationId) {
+            clearMessageContainer();
             showEmptyChat();
             leaveRealtimeRoom();
             return;
         }
 
-        showEmptyChat();
         subscribeDmRealtime(currentConversationId);
         await loadMessageHistory(currentConversationId);
     }
@@ -1653,13 +2007,45 @@ async function sendMessage() {
     }
 
     const input = document.getElementById('messageInput');
-    const body = sanitizeText(input.value, 2000);
-    if (!body) return;
-
+    const body = sanitizeText(input?.value || '', 2000);
     const quote = getPendingQuote();
-    clearPendingQuote();
-    input.value = '';
-    await dispatchOutgoingMessage({ body, contentType: 'text', quote });
+
+    if (typeof finishVoiceRecordingToPending === 'function') {
+        await finishVoiceRecordingToPending();
+    }
+
+    if (isMediaSendModalOpen()) return;
+
+    const hasPendingMedia = Boolean(pendingComposerMedia);
+    if (!body && !hasPendingMedia) return;
+
+    try {
+        if (hasPendingMedia) {
+            const ready = await ensurePendingMediaReady();
+            clearPendingQuote();
+            if (input) input.value = '';
+
+            await dispatchOutgoingMessage({
+                body,
+                contentType: ready.kind,
+                mediaUrl: ready.url,
+                r2Key: ready.r2Key,
+                quote
+            });
+
+            clearPendingComposerMedia();
+            return;
+        }
+
+        clearPendingQuote();
+        if (input) input.value = '';
+        await dispatchOutgoingMessage({ body, contentType: 'text', quote });
+    } catch (err) {
+        showNotify(err.message || 'Mesaj gönderilemedi.', {
+            title: 'Gönderim hatası',
+            type: 'error'
+        });
+    }
 }
 
 async function toggleMessageReaction({ messageId, clientId, emoji }) {
@@ -1756,6 +2142,10 @@ async function searchRadar(range) {
 
     if (!requireRadarVisibility()) return;
 
+    await profileReadyPromise;
+
+    const searchId = ++radarSearchId;
+
     document.querySelectorAll('.radar-btn').forEach((b) => b.classList.remove('active'));
     document.getElementById(`r-${range}`).classList.add('active');
 
@@ -1769,61 +2159,73 @@ async function searchRadar(range) {
     loading.textContent = 'Aranıyor...';
     carousel.appendChild(loading);
 
-    const coords = await fetchDistrictCoordinates(currentMyDistrict);
+    try {
+        const { data, error } = await withTimeout(
+            fetchNearbyUsers(maxKm),
+            15000,
+            'Arama zaman aşımına uğradı.'
+        );
 
-    const { data, error } = await supabase.rpc('get_nearby_users', {
-        my_lat: coords.lat,
-        my_lon: coords.lon,
-        max_dist_km: maxKm
-    });
+        if (searchId !== radarSearchId) return;
 
-    carousel.innerHTML = '';
+        carousel.innerHTML = '';
 
-    if (error) {
-        const err = document.createElement('div');
-        err.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
-        err.textContent = 'Radar yüklenemedi. Konum bilginizi profil ayarlarından güncelleyin.';
-        carousel.appendChild(err);
-        return;
+        if (error) {
+            const err = document.createElement('div');
+            err.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
+            err.textContent = 'Radar yüklenemedi. İlçe bilginizi profil ayarlarından kontrol edin.';
+            carousel.appendChild(err);
+            return;
+        }
+
+        const users = data || [];
+
+        if (users.length === 0) {
+            const empty = document.createElement('div');
+            empty.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
+            empty.textContent = 'Etrafta aktif kullanıcı bulunamadı.';
+            carousel.appendChild(empty);
+            return;
+        }
+
+        users.forEach((user) => {
+            const card = document.createElement('div');
+            card.className = 'user-discover-card';
+            card.addEventListener('click', () => startNewChat(
+                user.user_id,
+                user.username,
+                user.distance_km === 0 ? 'Aynı ilçe' : `${user.distance_km} km`,
+                user.avatar_url
+            ));
+
+            const avatar = document.createElement('div');
+            avatar.className = 'card-avatar';
+            applyAvatarDisplay(avatar, user.avatar_url, user.username);
+
+            const name = document.createElement('div');
+            name.className = 'card-name';
+            name.textContent = user.username;
+
+            const dist = document.createElement('div');
+            dist.className = 'card-dist';
+            dist.textContent = user.distance_km === 0
+                ? `📍 Aynı ilçe · ${user.district || ''}`
+                : `📍 ${user.distance_km} km · ${user.district || ''}`;
+
+            card.append(avatar, name, dist);
+            carousel.appendChild(card);
+        });
+    } catch (err) {
+        if (searchId !== radarSearchId) return;
+        carousel.innerHTML = '';
+        const fail = document.createElement('div');
+        fail.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
+        fail.textContent = err?.message === 'Arama zaman aşımına uğradı.'
+            ? 'Arama çok uzun sürdü. İnternet bağlantınızı kontrol edip tekrar deneyin.'
+            : 'Radar yüklenemedi. Lütfen tekrar deneyin.';
+        carousel.appendChild(fail);
+        console.error('Radar araması başarısız:', err);
     }
-
-    const users = data || [];
-
-    if (users.length === 0) {
-        const empty = document.createElement('div');
-        empty.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
-        empty.textContent = 'Etrafta aktif kullanıcı bulunamadı.';
-        carousel.appendChild(empty);
-        return;
-    }
-
-    users.forEach((user) => {
-        const card = document.createElement('div');
-        card.className = 'user-discover-card';
-        card.addEventListener('click', () => startNewChat(
-            user.user_id,
-            user.username,
-            user.distance_km === 0 ? 'Aynı ilçe' : `${user.distance_km} km`,
-            user.avatar_url
-        ));
-
-        const avatar = document.createElement('div');
-        avatar.className = 'card-avatar';
-        applyAvatarDisplay(avatar, user.avatar_url, user.username);
-
-        const name = document.createElement('div');
-        name.className = 'card-name';
-        name.textContent = user.username;
-
-        const dist = document.createElement('div');
-        dist.className = 'card-dist';
-        dist.textContent = user.distance_km === 0
-            ? `📍 Aynı ilçe · ${user.district || ''}`
-            : `📍 ${user.distance_km} km · ${user.district || ''}`;
-
-        card.append(avatar, name, dist);
-        carousel.appendChild(card);
-    });
 }
 
 async function openChatFromSender(senderId, username) {
@@ -1873,10 +2275,9 @@ async function startNewChat(userId, username, dist, avatarUrl = null) {
     addDmToSidebar(userId, username, dist, '', avatarUrl);
     setDmListSectionVisible(true);
 
-    document.getElementById('radarPanel').classList.remove('open');
     currentConversationId = convId;
     currentActiveChat = `User-${userId}`;
-    await openChat(`User-${userId}`, username, `Özel Sohbet (${dist})`);
+    await openChat(`User-${userId}`, username, `Özel Sohbet (${dist})`, { avatarUrl });
 }
 
 function formatChatListTime(dateString) {
@@ -2186,7 +2587,8 @@ async function refreshSessionState() {
         currentUserId = session.user.id;
         closeWelcomeModal();
         setNotificationUser(currentUserId);
-        await loadProfile();
+        profileReadyPromise = loadProfile();
+        await profileReadyPromise;
         document.getElementById('myActiveChatsList').innerHTML = '';
         await loadDmHistory();
         updateDistrictGroupTab();
@@ -2206,6 +2608,10 @@ async function refreshSessionState() {
 }
 
 async function initDashboard() {
+    initSeo();
+    initPasswordVisibilityToggles();
+    initProfileDropdown();
+    initHmCamouflage();
     initLinkViewer();
     initViewer();
     initAuthModal(refreshSessionState);
@@ -2220,7 +2626,11 @@ async function initDashboard() {
         messageContainer: document.getElementById('messageContainer'),
         isLoggedIn,
         promptLogin,
-        getViewerContext: () => ({ userId: currentUserId, username: currentMyUsername }),
+        getViewerContext: () => ({
+            userId: currentUserId,
+            username: currentMyUsername,
+            showQuoteAuthor: shouldShowMessageSender()
+        }),
         onReactionToggle: toggleMessageReaction,
         onDeleteMessages: softDeleteMessages,
         onSelectionChange: updateSelectionBarUi,
@@ -2251,7 +2661,8 @@ async function initDashboard() {
         currentUserId = session.user.id;
         closeWelcomeModal();
         setNotificationUser(currentUserId);
-        await loadProfile();
+        profileReadyPromise = loadProfile();
+        await profileReadyPromise;
         document.getElementById('myActiveChatsList').innerHTML = '';
         await loadDmHistory();
         updateDistrictGroupTab();
@@ -2295,6 +2706,8 @@ async function initDashboard() {
     window.addEventListener('woxifly:notification-click', (event) => {
         handleNotificationNavigation(event.detail || {});
     });
+
+    syncMenuToggleIcon();
 }
 
 function triggerPushForMessage(conversationId) {

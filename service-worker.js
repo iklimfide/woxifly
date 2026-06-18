@@ -1,6 +1,6 @@
 /* Woxifly — hafif PWA service worker (push + önbellek) */
 
-const CACHE_NAME = 'woxifly-shell-v1';
+const CACHE_NAME = 'woxifly-shell-v2';
 const SHELL_URLS = [
     '/',
     '/index.html',
@@ -39,11 +39,28 @@ self.addEventListener('fetch', (event) => {
 
     if (url.pathname.startsWith('/api/')) return;
 
+    const isHtmlShell = url.pathname === '/' || url.pathname.endsWith('.html');
+
+    if (isHtmlShell) {
+        event.respondWith(
+            fetch(request)
+                .then((response) => {
+                    if (response.ok) {
+                        const clone = response.clone();
+                        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+                    }
+                    return response;
+                })
+                .catch(() => caches.match(request))
+        );
+        return;
+    }
+
     event.respondWith(
         caches.match(request).then((cached) => {
             const network = fetch(request)
                 .then((response) => {
-                    if (response.ok && (url.pathname === '/' || url.pathname.endsWith('.html'))) {
+                    if (response.ok) {
                         const clone = response.clone();
                         caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
                     }

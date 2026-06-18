@@ -13,12 +13,28 @@ function buildThumb(kind, src) {
     const resolved = displayMediaUrl(src) || src;
 
     if (kind === 'video') {
-        const video = el('video', 'media-thumb');
+        const video = document.createElement('video');
+        video.className = 'media-thumb media-thumb--video';
         video.muted = true;
         video.playsInline = true;
-        video.setAttribute('playsinline', '');
         video.preload = 'metadata';
-        video.src = resolved;
+        video.setAttribute('aria-hidden', 'true');
+        if (resolved) {
+            video.src = resolved;
+            video.addEventListener('loadedmetadata', () => {
+                const seekTo = video.duration > 0.1 ? 0.05 : 0;
+                const onSeeked = () => {
+                    video.pause();
+                    video.removeEventListener('seeked', onSeeked);
+                };
+                video.addEventListener('seeked', onSeeked);
+                try {
+                    video.currentTime = seekTo;
+                } catch {
+                    video.pause();
+                }
+            }, { once: true });
+        }
         return video;
     }
 
@@ -28,6 +44,33 @@ function buildThumb(kind, src) {
     img.decoding = 'async';
     img.src = resolved;
     return img;
+}
+
+async function markThumbLoadError(card, thumb, resolved) {
+    if (card.classList.contains('media-card--error')) return;
+
+    try {
+        const response = await fetch(resolved, { method: 'HEAD', credentials: 'same-origin' });
+        if (response.ok) return;
+    } catch {
+        // HEAD desteklenmiyorsa GET ile doğrula
+        try {
+            const response = await fetch(resolved, {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: { Range: 'bytes=0-0' }
+            });
+            if (response.ok || response.status === 206) return;
+        } catch {
+            // aşağıda hata göster
+        }
+    }
+
+    thumb?.remove();
+    card.classList.add('media-card--error');
+    if (!card.querySelector('.media-card-label')) {
+        card.appendChild(el('span', 'media-card-label', 'Yüklenemedi'));
+    }
 }
 
 function makeMediaCard() {
@@ -100,16 +143,24 @@ export function renderMediaBlock(host, { kind, src, state = 'ready' }) {
     }
 
     const thumb = buildThumb(kind, src);
+    const resolved = displayMediaUrl(src) || src;
 
-    thumb.addEventListener('error', () => {
-        card.classList.add('media-card--error');
-        card.appendChild(el('span', 'media-card-label', 'Yüklenemedi'));
-    });
+    if (thumb.tagName === 'IMG') {
+        thumb.addEventListener('error', () => {
+            markThumbLoadError(card, thumb, resolved);
+        });
+    }
 
     card.appendChild(thumb);
 
     if (kind === 'video') {
         card.classList.add('media-card--video');
+        thumb.addEventListener('error', () => {
+            markThumbLoadError(card, thumb, resolved);
+        });
+        if (state === 'ready' && resolved && !resolved.startsWith('blob:')) {
+            markThumbLoadError(card, thumb, resolved);
+        }
     }
 
     bindCardActivation(card, () => {

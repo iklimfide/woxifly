@@ -686,7 +686,6 @@ function renderQuoteComposerBar() {
 
     const author = document.createElement('div');
     author.className = 'quote-composer-author';
-    author.textContent = formatQuoteAuthorLabel(pendingQuote, getViewerContext?.() || {});
 
     const preview = document.createElement('div');
     preview.className = 'quote-composer-preview';
@@ -699,7 +698,13 @@ function renderQuoteComposerBar() {
     closeBtn.textContent = '×';
     closeBtn.addEventListener('click', () => clearPendingQuote());
 
-    content.append(author, preview);
+    const viewer = getViewerContext?.() || {};
+    if (viewer.showQuoteAuthor !== false) {
+        author.textContent = formatQuoteAuthorLabel(pendingQuote, viewer);
+        content.append(author, preview);
+    } else {
+        content.append(preview);
+    }
     bar.append(accent, content, closeBtn);
     slot.appendChild(bar);
 }

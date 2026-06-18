@@ -106,7 +106,7 @@ export function getCronSecret() {
 export function getVapidConfig() {
     const publicKey = env('VAPID_PUBLIC_KEY');
     const privateKey = env('VAPID_PRIVATE_KEY');
-    const subject = env('VAPID_SUBJECT', 'mailto:notify@woxifly.app');
+    const subject = env('VAPID_SUBJECT', 'mailto:notify@woxifly.com');
 
     if (!publicKey || !privateKey) {
         return {

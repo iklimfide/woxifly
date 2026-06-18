@@ -88,8 +88,33 @@ export async function initPushNotifications() {
 
     if ('serviceWorker' in navigator) {
         try {
-            swRegistration = await navigator.serviceWorker.register(SW_URL, { scope: '/' });
+            swRegistration = await navigator.serviceWorker.register(SW_URL, {
+                scope: '/',
+                updateViaCache: 'none'
+            });
             await navigator.serviceWorker.ready;
+            swRegistration.update().catch(() => {});
+
+            swRegistration.addEventListener('updatefound', () => {
+                const worker = swRegistration.installing;
+                if (!worker) return;
+                worker.addEventListener('statechange', () => {
+                    if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                        worker.postMessage({ type: 'SKIP_WAITING' });
+                    }
+                });
+            });
+
+            if (swRegistration.waiting) {
+                swRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
+
+            let swReloading = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (swReloading) return;
+                swReloading = true;
+                window.location.reload();
+            });
 
             navigator.serviceWorker.addEventListener('message', (event) => {
                 if (event.data?.type === 'NOTIFICATION_CLICK') {

@@ -13,7 +13,8 @@ export const MEDIA_KINDS = {
         mimes: new Set(['video/mp4', 'video/webm', 'video/quicktime']),
         maxBytes: 50 * 1024 * 1024,
         ext: { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' },
-        prefix: 'videos'
+        // Mevcut R2 dosyaları uploads/{userId}/ altında; videos/ klasörü boş.
+        prefix: 'uploads'
     },
     audio: {
         mimes: new Set([
@@ -158,16 +159,42 @@ export async function readMedia(r2Key, { range } = {}) {
     const params = { Bucket: bucket, Key: r2Key };
     if (range) params.Range = range;
 
-    const result = await getClient().send(new GetObjectCommand(params));
+    try {
+        const result = await getClient().send(new GetObjectCommand(params));
 
-    return {
-        body: result.Body,
-        contentType: result.ContentType || 'application/octet-stream',
-        cacheControl: result.CacheControl || 'public, max-age=31536000, immutable',
-        contentLength: result.ContentLength,
-        contentRange: result.ContentRange,
-        partial: Boolean(range && result.ContentRange)
-    };
+        return {
+            body: result.Body,
+            contentType: result.ContentType || 'application/octet-stream',
+            cacheControl: result.CacheControl || 'public, max-age=31536000, immutable',
+            contentLength: result.ContentLength,
+            contentRange: result.ContentRange,
+            partial: Boolean(range && result.ContentRange)
+        };
+    } catch (err) {
+        const fallback = legacyR2KeyFallback(r2Key);
+        if (!fallback || fallback === r2Key) throw err;
+
+        const fallbackParams = { Bucket: bucket, Key: fallback };
+        if (range) fallbackParams.Range = range;
+
+        const result = await getClient().send(new GetObjectCommand(fallbackParams));
+
+        return {
+            body: result.Body,
+            contentType: result.ContentType || 'application/octet-stream',
+            cacheControl: result.CacheControl || 'public, max-age=31536000, immutable',
+            contentLength: result.ContentLength,
+            contentRange: result.ContentRange,
+            partial: Boolean(range && result.ContentRange)
+        };
+    }
+}
+
+/** videos/user/file → uploads/user/file (eski yükleme yolu). */
+function legacyR2KeyFallback(r2Key) {
+    const match = String(r2Key).match(/^videos\/([^/]+)\/([^/]+)$/);
+    if (!match) return null;
+    return `uploads/${match[1]}/${match[2]}`;
 }
 
 export async function deleteMedia(r2Key) {

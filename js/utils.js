@@ -1,5 +1,5 @@
 import { openLink } from './link-viewer.js';
-import { toMediaUrl, isMediaKind } from './media/urls.js';
+import { resolveMessageMediaUrl, isMediaKind } from './media/urls.js';
 import { createMediaHost } from './media/render.js';
 
 export function sanitizeText(value, maxLength = 2000) {
@@ -167,12 +167,14 @@ export function createMessageElement({
     onSenderClick,
     contentType = 'text',
     mediaUrl = null,
+    mediaR2Key = null,
     mediaState = 'ready',
     clientId = null,
     messageId = null,
     quote = null,
     reactions = null,
     showSender = true,
+    showQuoteAuthor = true,
     viewerUserId = null,
     viewerUsername = null
 }) {
@@ -183,8 +185,8 @@ export function createMessageElement({
     if (senderId) wrapper.dataset.senderId = senderId;
 
     const kind = isMediaKind(contentType) ? contentType : null;
-    const src = kind && mediaUrl
-        ? (mediaUrl.startsWith('blob:') ? mediaUrl : toMediaUrl(mediaUrl))
+    const src = kind && (mediaUrl || mediaR2Key)
+        ? (mediaUrl?.startsWith('blob:') ? mediaUrl : resolveMessageMediaUrl(mediaUrl, mediaR2Key))
         : null;
 
     if (kind) wrapper.dataset.contentType = kind;
@@ -226,18 +228,22 @@ export function createMessageElement({
         });
         quoteEl.className = `message-quote${quoteIsSelf ? ' message-quote--self' : ''}`;
 
-        const quoteAuthor = document.createElement('span');
-        quoteAuthor.className = 'message-quote-author';
-        quoteAuthor.textContent = formatQuoteAuthorLabel(quote, {
-            userId: viewerUserId,
-            username: viewerUsername
-        });
-
         const quoteBody = document.createElement('span');
         quoteBody.className = 'message-quote-body';
         quoteBody.textContent = formatQuotePreview(quote);
 
-        quoteEl.append(quoteAuthor, quoteBody);
+        if (showQuoteAuthor) {
+            const quoteAuthor = document.createElement('span');
+            quoteAuthor.className = 'message-quote-author';
+            quoteAuthor.textContent = formatQuoteAuthorLabel(quote, {
+                userId: viewerUserId,
+                username: viewerUsername
+            });
+            quoteEl.append(quoteAuthor, quoteBody);
+        } else {
+            quoteEl.appendChild(quoteBody);
+        }
+
         bodyWrap.appendChild(quoteEl);
     }
 
@@ -330,4 +336,21 @@ export function setButtonLoading(button, loading, defaultText) {
 export function showAuthError(element, message) {
     element.textContent = message;
     element.style.display = message ? 'block' : 'none';
+}
+
+export function initPasswordVisibilityToggles(root = document) {
+    root.querySelectorAll('.password-field').forEach((field) => {
+        const input = field.querySelector('input');
+        const btn = field.querySelector('.password-toggle-btn');
+        if (!input || !btn || btn.dataset.passwordToggleBound) return;
+
+        btn.dataset.passwordToggleBound = '1';
+        btn.addEventListener('click', () => {
+            const revealed = input.type === 'text';
+            input.type = revealed ? 'password' : 'text';
+            btn.classList.toggle('is-revealed', !revealed);
+            btn.setAttribute('aria-label', revealed ? 'Göster' : 'Gizle');
+            btn.setAttribute('aria-pressed', revealed ? 'false' : 'true');
+        });
+    });
 }

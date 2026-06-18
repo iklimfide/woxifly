@@ -4,20 +4,73 @@ import { R2_PUBLIC_BASE_URL } from '../config.js';
 export const MEDIA_BASE = '/api/media';
 
 const MEDIA_FOLDER_RE = '(?:images|videos|audio|avatars|uploads)';
-const MEDIA_PATH_RE = new RegExp(`${MEDIA_FOLDER_RE}/[a-zA-Z0-9-]+/[a-f0-9-]{36}\\.[a-z0-9]+$`, 'i');
+const R2_PREFIXES = ['images/', 'videos/', 'audio/', 'avatars/', 'uploads/'];
+const MEDIA_PATH_LOOSE_RE = new RegExp(`${MEDIA_FOLDER_RE}/[a-zA-Z0-9._%-/]+\\.[a-zA-Z0-9]{2,5}`, 'i');
+
+export function isR2MediaKey(key) {
+    if (!key || typeof key !== 'string' || key.includes('..')) return false;
+    const normalized = key.replace(/^\/+/, '').split('?')[0].split('#')[0];
+    return R2_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function normalizeMediaInput(input) {
+    if (!input || typeof input !== 'string') return null;
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    try {
+        return decodeURIComponent(trimmed);
+    } catch {
+        return trimmed;
+    }
+}
 
 function extractMediaPath(input) {
-    if (!input || typeof input !== 'string') return null;
+    const decoded = normalizeMediaInput(input);
+    if (!decoded) return null;
 
-    const direct = input.match(MEDIA_PATH_RE);
+    const bare = decoded.replace(/^\/+/, '').split('?')[0].split('#')[0];
+    if (isR2MediaKey(bare)) return bare;
+
+    const direct = decoded.match(MEDIA_PATH_LOOSE_RE);
     if (direct) return direct[0];
 
     try {
-        const { pathname } = new URL(input, 'http://local');
-        const pathMatch = pathname.match(new RegExp(`/(?:${MEDIA_FOLDER_RE})/[a-zA-Z0-9-]+/[a-f0-9-]{36}\\.[a-z0-9]+$`, 'i'));
-        if (pathMatch) return pathMatch[0].replace(/^\//, '');
+        const { pathname } = new URL(decoded, 'http://local');
+        const pathMatch = pathname.match(MEDIA_PATH_LOOSE_RE);
+        if (pathMatch) return pathMatch[0];
     } catch {
         return null;
+    }
+
+    return null;
+}
+
+function legacyR2KeyFallback(key) {
+    const match = String(key).match(/^videos\/([^/]+)\/([^/]+)$/);
+    if (!match) return null;
+    return `uploads/${match[1]}/${match[2]}`;
+}
+
+function normalizeR2Key(key) {
+    const bare = String(key).replace(/^\/+/, '').split('?')[0].split('#')[0];
+    return legacyR2KeyFallback(bare) || bare;
+}
+
+/** Geçmiş mesajlar: media_url + r2_key yedek çözümleme. */
+export function resolveMessageMediaUrl(mediaUrl, r2Key = null) {
+    const fromUrl = toMediaUrl(mediaUrl);
+    if (fromUrl) {
+        const path = extractMediaPath(fromUrl);
+        if (path) {
+            const normalized = normalizeR2Key(path);
+            if (normalized !== path) return `${MEDIA_BASE}/${normalized}`;
+        }
+        return fromUrl;
+    }
+
+    if (isR2MediaKey(r2Key)) {
+        const key = normalizeR2Key(r2Key);
+        return `${MEDIA_BASE}/${key}`;
     }
 
     return null;
@@ -39,9 +92,9 @@ export function toBroadcastMediaUrl(input) {
 
 /** Veritabanına kayıt — her zaman /api/media proxy yolu (constraint uyumlu). */
 export function toPersistMediaUrl(input, r2Key = null) {
-    if (r2Key && typeof r2Key === 'string') {
-        const key = r2Key.replace(/^\/+/, '');
-        if (MEDIA_PATH_RE.test(key)) return `${MEDIA_BASE}/${key}`;
+    if (isR2MediaKey(r2Key)) {
+        const key = String(r2Key).replace(/^\/+/, '').split('?')[0].split('#')[0];
+        return `${MEDIA_BASE}/${key}`;
     }
 
     const mediaPath = extractMediaPath(input);

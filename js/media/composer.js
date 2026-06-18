@@ -12,7 +12,6 @@ function setUploadBar(active) {
     area?.classList.toggle('uploading', active);
     if (attachBtn) attachBtn.disabled = active;
     if (voiceBtn) voiceBtn.disabled = active;
-    if (sendBtn) sendBtn.disabled = active;
 
     if (bar) {
         bar.hidden = !active;
@@ -68,20 +67,25 @@ async function deliverPickedMedia(file, { showNotify, onMediaMessage }) {
     await onMediaMessage(file, kind);
 }
 
+export async function uploadMediaFile(file, kind) {
+    const result = await uploadFile(file, kind);
+    return {
+        url: result.url,
+        r2Key: result.r2Key,
+        kind: result.kind || kind
+    };
+}
+
 export async function sendMediaFile(file, {
     kind,
     caption,
     clientId,
     onDeliver
 }) {
-    const localPreview = (kind === 'image' || kind === 'video' || kind === 'audio')
-        ? URL.createObjectURL(file)
-        : null;
-
     setUploadBar(true);
 
     try {
-        const result = await uploadFile(file, kind);
+        const result = await uploadMediaFile(file, kind);
 
         updateMediaBlock(clientId, {
             kind,
@@ -91,22 +95,19 @@ export async function sendMediaFile(file, {
 
         setUploadBar(false);
 
-        if (localPreview) {
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => URL.revokeObjectURL(localPreview));
+        if (onDeliver) {
+            await onDeliver({
+                clientId,
+                kind: result.kind,
+                url: result.url,
+                r2Key: result.r2Key,
+                caption
             });
         }
 
-        await onDeliver({
-            clientId,
-            kind: result.kind,
-            url: result.url,
-            r2Key: result.r2Key,
-            caption
-        });
+        return result;
     } catch (err) {
         setUploadBar(false);
-        if (localPreview) URL.revokeObjectURL(localPreview);
         updateMediaBlock(clientId, { kind, src: null, state: 'failed' });
         throw err;
     }
