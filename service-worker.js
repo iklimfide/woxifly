@@ -1,6 +1,6 @@
 /* Woxifly — hafif PWA service worker (push + önbellek) */
 
-const CACHE_NAME = 'woxifly-shell-v2';
+const CACHE_NAME = 'woxifly-shell-v6';
 const SHELL_URLS = [
     '/',
     '/index.html',

@@ -31,8 +31,8 @@ export function updatePWAManifest(isCalculatorMode) {
             : 'Gizliliğe önem veren ilçe bazlı mesajlaşma platformu.',
         start_url: '/',
         display: 'standalone',
-        background_color: '#fdfbf7',
-        theme_color: '#d97706',
+        background_color: '#000000',
+        theme_color: '#000000',
         icons: [
             { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
             { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }
@@ -48,7 +48,7 @@ export function updatePWAManifest(isCalculatorMode) {
 
     const themeColor = document.querySelector('meta[name="theme-color"]');
     if (themeColor) {
-        themeColor.setAttribute('content', isCalculatorMode ? '#d97706' : '#2077c5');
+        themeColor.setAttribute('content', isCalculatorMode ? '#000000' : '#2077c5');
     }
 }
 
@@ -67,23 +67,69 @@ export function saveHmSettings(enabled, pin) {
     updatePWAManifest(enabled);
 }
 
+function setPinGroupVisible(visible) {
+    const pinGroup = document.getElementById('hmPinGroup');
+    if (!pinGroup) return;
+    pinGroup.hidden = !visible;
+    pinGroup.style.display = visible ? 'block' : 'none';
+    pinGroup.setAttribute('aria-hidden', visible ? 'false' : 'true');
+}
+
 export function syncHmProfileUi() {
     const toggle = document.getElementById('hmPerdeInput');
     const pinInput = document.getElementById('hmPinInput');
-    const pinGroup = document.getElementById('hmPinGroup');
     if (!toggle) return;
 
     const enabled = isHmEnabled();
     toggle.checked = enabled;
+    setPinGroupVisible(enabled);
+
     if (pinInput) {
-        pinInput.value = enabled && localStorage.getItem(HM_PIN_KEY) ? getHmPin() : '';
+        if (enabled) {
+            pinInput.value = localStorage.getItem(HM_PIN_KEY) ? getHmPin() : DEFAULT_PIN;
+        } else {
+            pinInput.value = '';
+        }
     }
-    if (pinGroup) pinGroup.hidden = !enabled;
+}
+
+function onHmToggleChanged() {
+    const toggle = document.getElementById('hmPerdeInput');
+    const pinInput = document.getElementById('hmPinInput');
+    if (!toggle) return;
+
+    const enabled = toggle.checked;
+    setPinGroupVisible(enabled);
+
+    if (enabled && pinInput && !pinInput.value.trim()) {
+        pinInput.value = DEFAULT_PIN;
+    }
+
+    const pin = pinInput?.value?.trim() || '';
+    saveHmSettings(enabled, enabled ? (pin || DEFAULT_PIN) : '');
+    syncHmProfileUi();
 }
 
 function updateCalcDisplay() {
     const el = document.getElementById('hmDisplay');
-    if (el) el.textContent = calcState.display;
+    if (!el) return;
+
+    el.textContent = calcState.display;
+
+    const len = calcState.display.replace(/^-/, '').length;
+    if (len > 9) el.style.fontSize = 'clamp(2rem, 10vw, 3rem)';
+    else if (len > 6) el.style.fontSize = 'clamp(2.5rem, 13vw, 4rem)';
+    else el.style.fontSize = '';
+
+    syncOpButtons();
+}
+
+function syncOpButtons() {
+    document.querySelectorAll('.hm-calc-btn--op[data-hm-action]').forEach((btn) => {
+        const op = btn.dataset.hmAction;
+        if (!['+', '-', '×', '÷'].includes(op)) return;
+        btn.classList.toggle('hm-calc-btn--op-active', calcState.operator === op);
+    });
 }
 
 function resetCalc() {
@@ -111,6 +157,28 @@ function inputDecimal() {
     updateCalcDisplay();
 }
 
+function toggleSign() {
+    if (calcState.display === '0') return;
+    calcState.display = calcState.display.startsWith('-')
+        ? calcState.display.slice(1)
+        : `-${calcState.display}`;
+    calcState.fresh = false;
+    updateCalcDisplay();
+}
+
+function applyPercent() {
+    const val = parseDisplay() / 100;
+    calcState.display = formatCalcNumber(val);
+    calcState.fresh = true;
+    updateCalcDisplay();
+}
+
+function formatCalcNumber(n) {
+    if (!Number.isFinite(n)) return '0';
+    if (Number.isInteger(n)) return String(n);
+    return String(parseFloat(n.toFixed(10)));
+}
+
 function parseDisplay() {
     return parseFloat(calcState.display) || 0;
 }
@@ -123,6 +191,7 @@ function setOperator(op) {
     }
     calcState.operator = op;
     calcState.fresh = true;
+    syncOpButtons();
 }
 
 function computeResult() {
@@ -136,11 +205,11 @@ function computeResult() {
         case '+': result = a + b; break;
         case '-': result = a - b; break;
         case '×': result = a * b; break;
+        case '÷': result = b === 0 ? 0 : a / b; break;
         default: return;
     }
 
-    const str = Number.isInteger(result) ? String(result) : String(parseFloat(result.toFixed(10)));
-    calcState.display = str;
+    calcState.display = formatCalcNumber(result);
     calcState.stored = null;
     calcState.operator = null;
     calcState.fresh = true;
@@ -164,12 +233,19 @@ function handleCalcAction(action) {
         case 'C':
             resetCalc();
             break;
+        case '±':
+            toggleSign();
+            break;
+        case '%':
+            applyPercent();
+            break;
         case '.':
             inputDecimal();
             break;
         case '+':
         case '-':
         case '×':
+        case '÷':
             setOperator(action);
             break;
         case '=':
@@ -214,24 +290,26 @@ function bindCalcButtons() {
 function bindProfileControls() {
     const toggle = document.getElementById('hmPerdeInput');
     const pinInput = document.getElementById('hmPinInput');
-    if (!toggle) return;
+    if (!toggle || toggle.dataset.hmBound === '1') return;
 
-    toggle.addEventListener('change', () => {
-        const enabled = toggle.checked;
-        const pin = pinInput?.value?.trim() || '';
-        saveHmSettings(enabled, enabled ? (pin || DEFAULT_PIN) : '');
-        syncHmProfileUi();
-    });
+    toggle.dataset.hmBound = '1';
+    toggle.addEventListener('change', onHmToggleChanged);
 
     pinInput?.addEventListener('change', () => {
         if (!isHmEnabled()) return;
         const pin = pinInput.value.trim();
         if (!/^\d{4,8}$/.test(pin)) {
-            pinInput.value = localStorage.getItem(HM_PIN_KEY) || '';
+            pinInput.value = localStorage.getItem(HM_PIN_KEY) || DEFAULT_PIN;
             return;
         }
         localStorage.setItem(HM_PIN_KEY, pin);
     });
+}
+
+/** Profil paneli açıldığında çağrılır — toggle bağlantısı kaçırıldıysa telafi eder. */
+export function ensureHmProfileControls() {
+    bindProfileControls();
+    syncHmProfileUi();
 }
 
 function bindLeaveGuard() {

@@ -92,9 +92,18 @@ import {
 import {
     initHmCamouflage,
     syncHmProfileUi,
+    ensureHmProfileControls,
     readHmSettingsFromProfile
 } from './hm-camouflage.js';
 import { initSeo } from './seo.js';
+import {
+    configureTopbar,
+    refreshTopbarMenu,
+    closeTopbarMenus,
+    syncTopbarMenuIcon,
+    setTopbarTitleMode,
+    setTopbarProfileAvatar
+} from './topbar.js';
 
 let currentUserId = null;
 let pendingForward = null;
@@ -256,12 +265,12 @@ function isLoggedIn() {
 }
 
 function promptLogin() {
-    document.getElementById('profileDropdown').classList.remove('show');
+    closeTopbarMenus();
     openAuthModal('login');
 }
 
 function promptRegister() {
-    document.getElementById('profileDropdown').classList.remove('show');
+    closeTopbarMenus();
     openAuthModal('register');
 }
 
@@ -296,9 +305,17 @@ async function resolveDmPartnerAvatar(userId, avatarUrl = null) {
 }
 
 function refreshAvatarDisplays() {
-    const letter = isLoggedIn() ? currentMyUsername.charAt(0) : '?';
-    applyAvatarDisplay(document.getElementById('headerProfilePic'), currentMyAvatarUrl, letter);
-    applyAvatarDisplay(document.getElementById('profileAvatarPreview'), currentMyAvatarUrl, letter);
+    const letter = currentMyUsername?.charAt(0) || 'K';
+    setTopbarProfileAvatar({
+        imageUrl: displayMediaUrl(currentMyAvatarUrl),
+        letter,
+        guest: !isLoggedIn()
+    });
+    applyAvatarDisplay(
+        document.getElementById('profileAvatarPreview'),
+        currentMyAvatarUrl,
+        isLoggedIn() ? letter : '?'
+    );
 
     const removeBtn = document.getElementById('profileAvatarRemoveBtn');
     if (removeBtn) removeBtn.hidden = !currentMyAvatarUrl;
@@ -481,6 +498,7 @@ function populateDistrictSelects() {
 
 function updateMessageInputState() {
     const input = document.getElementById('messageInput');
+    if (!input) return;
     input.placeholder = isLoggedIn()
         ? 'Mesajınızı yazın veya görsel yapıştırın...'
         : 'Mesaj yazmak için giriş yapın...';
@@ -491,63 +509,8 @@ function updateMessageInputState() {
     };
 }
 
-function updateHeaderMenu() {
-    const dropdown = document.getElementById('profileDropdown');
-    dropdown.innerHTML = '';
-
-    if (isLoggedIn()) {
-        refreshAvatarDisplays();
-
-        const profileBtn = document.createElement('button');
-        profileBtn.className = 'dropdown-item';
-        profileBtn.textContent = '⚙️ Profil Ayarları';
-        profileBtn.addEventListener('click', openProfileSettings);
-
-        const divider = document.createElement('div');
-        divider.className = 'dropdown-divider';
-
-        const logoutBtn = document.createElement('button');
-        logoutBtn.className = 'dropdown-item';
-        logoutBtn.style.color = '#e53e3e';
-        logoutBtn.textContent = '🚪 Çıkış Yap';
-        logoutBtn.addEventListener('click', handleLogout);
-
-        dropdown.append(profileBtn, divider, logoutBtn);
-        return;
-    }
-
-    currentMyAvatarUrl = null;
-    currentMyAvatarR2Key = null;
-    refreshAvatarDisplays();
-
-    const loginBtn = document.createElement('button');
-    loginBtn.className = 'dropdown-item';
-    loginBtn.textContent = '🔑 Giriş Yap';
-    loginBtn.addEventListener('click', promptLogin);
-
-    const divider = document.createElement('div');
-    divider.className = 'dropdown-divider';
-
-    const registerBtn = document.createElement('button');
-    registerBtn.className = 'dropdown-item';
-    registerBtn.textContent = '✨ Kayıt Ol';
-    registerBtn.addEventListener('click', promptRegister);
-
-    dropdown.append(loginBtn, divider, registerBtn);
-}
-
 function isMobileLayout() {
     return true;
-}
-
-function syncMenuToggleIcon() {
-    const btn = document.querySelector('.menu-toggle');
-    const sidebar = document.getElementById('sidebar');
-    if (!btn || !sidebar) return;
-
-    const isOpen = sidebar.classList.contains('open');
-    btn.textContent = isOpen ? '×' : '☰';
-    btn.setAttribute('aria-label', isOpen ? 'Menüyü kapat' : 'Menüyü aç');
 }
 
 window.toggleSidebar = function () {
@@ -566,35 +529,14 @@ window.toggleSidebar = function () {
 
     sidebar.classList.add('open');
     overlay.classList.add('show');
-    syncMenuToggleIcon();
+    syncTopbarMenuIcon();
 };
 
 window.closeSidebar = function () {
     document.getElementById('sidebar')?.classList.remove('open');
     document.getElementById('sidebarOverlay')?.classList.remove('show');
-    syncMenuToggleIcon();
+    syncTopbarMenuIcon();
 };
-
-window.toggleDropdown = function (event) {
-    event.stopPropagation();
-    closeNotificationDropdown();
-    document.getElementById('profileDropdown').classList.toggle('show');
-};
-
-window.onclick = function () {
-    document.getElementById('profileDropdown')?.classList.remove('show');
-    closeNotificationDropdown();
-};
-
-function initProfileDropdown() {
-    document.getElementById('profileDropdown')?.addEventListener('click', (event) => {
-        event.stopPropagation();
-    });
-
-    document.getElementById('headerProfilePic')?.addEventListener('click', (event) => {
-        toggleDropdown(event);
-    });
-}
 
 function showMainContentView() {
     clearRadarMobileView();
@@ -615,13 +557,13 @@ window.switchView = function (panelId) {
 
     document.querySelectorAll('.view-panel').forEach((p) => p.classList.remove('active'));
     document.getElementById(panelId).classList.add('active');
-    document.getElementById('headerTitleChat').style.display = panelId === 'profile-panel' ? 'none' : 'flex';
-    document.getElementById('headerTitleProfile').style.display = panelId === 'profile-panel' ? 'block' : 'none';
+    setTopbarTitleMode(panelId === 'profile-panel' ? 'profile' : 'chat');
     if (panelId === 'profile-panel') {
         updatePushStatusUI();
-        syncHmProfileUi();
+        ensureHmProfileControls();
+        initPasswordVisibilityToggles(document.getElementById('hmPinGroup'));
     }
-    document.getElementById('profileDropdown').classList.remove('show');
+    closeTopbarMenus();
     closeNotificationDropdown();
     if (panelId !== 'chat-panel') {
         exitSelectionMode(document.getElementById('messageContainer'));
@@ -806,7 +748,7 @@ async function showChatListHome() {
 
     switchView('chat-panel');
     closeSidebar();
-    syncMenuToggleIcon();
+    syncTopbarMenuIcon();
     updateDistrictGroupTab();
     updateMessageInputState();
     saveAppRoute();
@@ -869,7 +811,8 @@ async function loadProfile() {
     const visibleInput = document.getElementById('isVisibleInput');
     if (visibleInput) visibleInput.checked = currentMyIsVisible;
 
-    updateHeaderMenu();
+    refreshAvatarDisplays();
+    refreshTopbarMenu();
     updateMessageInputState();
     updatePushStatusUI();
 }
@@ -921,7 +864,7 @@ async function saveProfile() {
     currentMyDistrict = newDistrict;
     currentMyUsername = newName;
     currentMyIsVisible = isVisible;
-    updateHeaderMenu();
+    refreshTopbarMenu();
 
     if (currentGroupDistrict) {
         updatePresenceTrack({
@@ -1039,6 +982,8 @@ function initMediaComposer() {
         voiceBtn?.setAttribute('title', 'Tarayıcı ses kaydını desteklemiyor');
         return;
     }
+
+    if (!voiceBtn) return;
 
     let voiceRecordingFinishing = false;
 
@@ -2577,9 +2522,10 @@ async function handleLogout() {
     dmTitles.clear();
     mostRecentDmChat = null;
     renderDmEmptyState();
-    document.getElementById('profileDropdown').classList.remove('show');
+    closeTopbarMenus();
     setNotificationUser(null);
-    updateHeaderMenu();
+    refreshAvatarDisplays();
+    refreshTopbarMenu();
     updateMessageInputState();
     await showChatListHome();
     maybeShowWelcomeModal();
@@ -2603,38 +2549,52 @@ async function refreshSessionState() {
         } else if (currentActiveChat?.startsWith('User-') && currentConversationId) {
             subscribeDmRealtime(currentConversationId);
         }
+
+        refreshAvatarDisplays();
+        refreshTopbarMenu();
     } else {
         setNotificationUser(null);
         renderDmEmptyState();
-        updateHeaderMenu();
+        refreshAvatarDisplays();
+        refreshTopbarMenu();
         updateMessageInputState();
         maybeShowWelcomeModal();
     }
 }
 
 function bootstrapAppUi() {
-    updateHeaderMenu();
+    refreshAvatarDisplays();
+    refreshTopbarMenu();
     updateMessageInputState();
     updateDistrictGroupTab();
-    syncMenuToggleIcon();
+    syncTopbarMenuIcon();
+}
+
+function runInitStep(name, fn) {
+    try {
+        fn();
+    } catch (err) {
+        console.error(`[woxifly] ${name} failed:`, err);
+    }
 }
 
 async function initDashboard() {
-    initSeo();
-    initPasswordVisibilityToggles();
-    initProfileDropdown();
-    initHmCamouflage();
-    initLinkViewer();
-    initViewer();
-    initAuthModal(refreshSessionState);
-    initWelcomeModal({
+    bootstrapAppUi();
+
+    runInitStep('initSeo', initSeo);
+    runInitStep('initPasswordVisibilityToggles', () => initPasswordVisibilityToggles());
+    runInitStep('initHmCamouflage', initHmCamouflage);
+    runInitStep('initLinkViewer', initLinkViewer);
+    runInitStep('initViewer', initViewer);
+    runInitStep('initAuthModal', () => initAuthModal(refreshSessionState));
+    runInitStep('initWelcomeModal', () => initWelcomeModal({
         isLoggedIn,
         onLogin: promptLogin,
         onRegister: promptRegister
-    });
-    initNotifyModal();
-    initMediaComposer();
-    initMessageInteractions({
+    }));
+    runInitStep('initNotifyModal', initNotifyModal);
+    runInitStep('initMediaComposer', initMediaComposer);
+    runInitStep('initMessageInteractions', () => initMessageInteractions({
         messageContainer: document.getElementById('messageContainer'),
         isLoggedIn,
         promptLogin,
@@ -2648,22 +2608,22 @@ async function initDashboard() {
         onSelectionChange: updateSelectionBarUi,
         onForwardMessage: handleForwardRequest,
         showNotify
-    });
-    initMessageSelectionControls();
+    }));
+    runInitStep('initMessageSelectionControls', initMessageSelectionControls);
     document.getElementById('appHomeLink')?.addEventListener('click', (event) => {
         event.preventDefault();
         showChatListHome();
     });
-    populateDistrictSelects();
-    initProfileAvatar();
-    initPushControls();
-    initNotificationCenter({
+    runInitStep('populateDistrictSelects', populateDistrictSelects);
+    runInitStep('initProfileAvatar', initProfileAvatar);
+    runInitStep('initPushControls', initPushControls);
+    runInitStep('initNotificationCenter', () => initNotificationCenter({
         onNavigate: (route) => {
             if (route?.chatId) {
                 openChatFromNotification({ chatId: route.chatId });
             }
         }
-    });
+    }));
     bootstrapAppUi();
 
     const pushInitPromise = initPushNotifications()
@@ -2687,8 +2647,8 @@ async function initDashboard() {
         maybeShowWelcomeModal();
     }
 
-    updateDistrictGroupTab();
-    updateHeaderMenu();
+    refreshAvatarDisplays();
+    refreshTopbarMenu();
 
     const route = parseAppRoute();
     if (route) {
@@ -2721,7 +2681,7 @@ async function initDashboard() {
         handleNotificationNavigation(event.detail || {});
     });
 
-    syncMenuToggleIcon();
+    syncTopbarMenuIcon();
     void pushInitPromise;
 }
 
@@ -2811,4 +2771,18 @@ async function handleStartupNotificationRoute() {
     await openChatFromNotification(route);
 }
 
-initDashboard();
+configureTopbar({
+    getIsLoggedIn: isLoggedIn,
+    onLogin: promptLogin,
+    onRegister: promptRegister,
+    onProfileSettings: openProfileSettings,
+    onLogout: handleLogout,
+    onMenuClick: () => window.toggleSidebar?.()
+});
+
+refreshTopbarMenu();
+bootstrapAppUi();
+initDashboard().catch((err) => {
+    console.error('[woxifly] initDashboard failed:', err);
+    bootstrapAppUi();
+});

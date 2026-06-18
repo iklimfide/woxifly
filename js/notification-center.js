@@ -1,3 +1,5 @@
+import { closeTopbarMenus } from './topbar.js';
+
 const STORAGE_KEY = 'woxifly_notifications';
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ITEMS = 200;
@@ -273,7 +275,7 @@ function handleItemClick(item) {
     }
 
     closeNotificationMenu();
-    document.getElementById('profileDropdown')?.classList.remove('show');
+    closeTopbarMenus();
     onNavigate?.(item.route);
     renderMenu();
 }
@@ -290,8 +292,7 @@ export function initNotificationCenter({ onNavigate: navigate, userId = null }) 
     bellBtn?.addEventListener('click', (event) => {
         event.stopPropagation();
         const menu = document.getElementById('notificationDropdown');
-        const profile = document.getElementById('profileDropdown');
-        profile?.classList.remove('show');
+        closeTopbarMenus();
 
         purgeExpiredItems();
         menu?.classList.toggle('show');

@@ -95,10 +95,19 @@
             max-width: 430px;
             height: 100%;
             display: flex;
+            flex-direction: column;
             overflow: hidden;
             background-color: var(--bg-light);
             color: var(--text-main);
             box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 20px 60px rgba(15, 23, 42, 0.2);
+        }
+
+        .app-body {
+            flex: 1;
+            position: relative;
+            display: flex;
+            min-height: 0;
+            overflow: hidden;
         }
 
         @media (max-width: 430px) {
@@ -203,18 +212,8 @@
             text-align: center;
         }
 
-        body.chats-home-view .main-content {
-            display: flex;
-            flex-direction: column;
-            position: absolute;
-            inset: 0 0 auto 0;
-            z-index: 210;
-            height: auto;
-            pointer-events: none;
-        }
-
-        body.chats-home-view .content-header {
-            pointer-events: auto;
+        body.chats-home-view .app-body .main-content {
+            display: none !important;
         }
 
         body.chats-home-view .discover-radar-panel,
@@ -227,7 +226,6 @@
             width: 100%;
             max-width: 100%;
             box-shadow: none;
-            padding-top: var(--header-h);
         }
 
         body.chats-home-view .sidebar-overlay {
@@ -236,11 +234,6 @@
 
         body.chats-home-view .sidebar-close-btn {
             display: none;
-        }
-
-        body.chats-home-view .menu-toggle {
-            visibility: hidden;
-            pointer-events: none;
         }
 
         body.chat-open-view .sidebar.open .sidebar-close-btn,
@@ -267,7 +260,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            top: var(--header-h);
+            top: 0;
             max-height: none;
             z-index: 150;
             transform: none;
@@ -303,100 +296,6 @@
 
         /* --- ANA İÇERİK --- */
         .main-content { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; min-width: 0; width: 100%; max-width: 100%; }
-
-        .content-header {
-            padding: 10px 12px;
-            padding-top: max(10px, env(safe-area-inset-top));
-            background: linear-gradient(to bottom, var(--gradient-blue-start), var(--gradient-blue-end));
-            border-bottom: 1px solid #1a6cb1;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-            color: white;
-            min-height: var(--header-h);
-            z-index: 10;
-            position: relative;
-            flex-shrink: 0;
-        }
-
-        .header-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
-
-        .menu-toggle {
-            width: 40px;
-            height: 40px;
-            border: none;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.18);
-            color: white;
-            font-size: 1.2rem;
-            cursor: pointer;
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .header-title {
-            display: flex;
-            align-items: center;
-            min-width: 0;
-            flex: 1;
-        }
-
-        .header-title .avatar { width: 36px; height: 36px; margin-right: 10px; font-size: 0.9rem; }
-
-        .header-chat-text { min-width: 0; }
-        .header-chat-text #activeChatName,
-        .header-chat-text #headerTitleProfile > div {
-            font-weight: 600;
-            font-size: 0.95rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        #activeChatStatus {
-            font-size: 0.75rem;
-            color: #c4f9da;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        .header-profile-wrapper { position: relative; flex-shrink: 0; }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-shrink: 0;
-        }
-
-        .header-bell-wrapper { position: relative; }
-
-        .header-bell-btn {
-            width: 40px;
-            height: 40px;
-            border: none;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.18);
-            color: white;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            position: relative;
-        }
-
-        .header-bell-btn:active { transform: scale(0.96); }
-
-        .header-bell-btn svg {
-            width: 20px;
-            height: 20px;
-            fill: currentColor;
-        }
 
         .notification-badge {
             position: absolute;
@@ -549,29 +448,10 @@
 
         .notification-action-btn:active { background: #f1f5f9; }
 
-        .header-pp {
-            width: 40px; height: 40px; border-radius: 50%; border: 2px solid white; background-color: rgba(255, 255, 255, 0.2); color: white; font-weight: bold; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; overflow: hidden; padding: 0; font: inherit;
-        }
-
-        .header-pp img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        .profile-dropdown {
-            position: absolute; top: calc(100% + 8px); right: 0; background: #ffffff; border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.12); width: min(220px, 80vw); display: none; flex-direction: column; z-index: 220; overflow: hidden;
-        }
-        .profile-dropdown.show { display: flex; }
-        .dropdown-item { padding: 14px 16px; font-size: 0.9rem; color: #334155; cursor: pointer; display: flex; align-items: center; gap: 10px; text-align: left; border: none; background: none; width: 100%; min-height: 48px; }
-        .dropdown-item:active { background-color: #f1f5f9; color: var(--accent-color); }
-
-        .dropdown-divider { height: 1px; background-color: var(--border-color); }
-
         /* RADAR */
         .discover-radar-panel {
             position: absolute;
-            top: var(--header-h);
+            top: 0;
             left: 0;
             right: 0;
             background: #ffffff;
@@ -2635,6 +2515,10 @@
         .media-send-modal-status[hidden] { display: none !important; }
 
         /* --- HESAP MAKİNESİ KAMUFLAJ --- */
+        #hmPinGroup[hidden] {
+            display: none !important;
+        }
+
         html.hm-active .app-shell,
         html.hm-active .link-viewer,
         html.hm-active .media-viewer,
@@ -2651,10 +2535,11 @@
             position: fixed;
             inset: 0;
             z-index: 999999;
-            background: #1c1c1e;
-            align-items: center;
-            justify-content: center;
-            padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+            background: #000;
+            flex-direction: column;
+            justify-content: flex-end;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
         }
 
         .hm-veil.active {
@@ -2666,47 +2551,70 @@
         }
 
         .hm-calc {
-            width: min(100%, 320px);
-            background: #2c2c2e;
-            border-radius: 20px;
-            overflow: hidden;
-            box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+            width: 100%;
+            max-width: 430px;
+            margin: 0 auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            background: #000;
             user-select: none;
+            -webkit-user-select: none;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
         }
 
         .hm-calc-display {
-            padding: 28px 20px 16px;
+            flex: 1;
+            display: flex;
+            align-items: flex-end;
+            justify-content: flex-end;
+            padding: max(16px, env(safe-area-inset-top)) 24px 12px;
             text-align: right;
-            font-size: 3rem;
+            font-size: clamp(3rem, 16vw, 5.25rem);
             font-weight: 300;
+            letter-spacing: -0.02em;
             color: #fff;
             font-variant-numeric: tabular-nums;
-            min-height: 72px;
+            line-height: 1.05;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            background: #1c1c1e;
+            background: transparent;
+            min-height: 80px;
         }
 
         .hm-calc-grid {
+            --hm-gap: clamp(10px, 2.8vw, 14px);
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 1px;
-            background: #3a3a3c;
+            gap: var(--hm-gap);
+            padding: var(--hm-gap);
+            background: transparent;
         }
 
         .hm-calc-btn {
             border: none;
-            background: #636366;
-            color: #fff;
-            font-size: 1.35rem;
-            padding: 22px 0;
+            margin: 0;
+            padding: 0;
             cursor: pointer;
-            transition: background 0.12s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 50%;
+            font-size: clamp(1.5rem, 6.5vw, 2rem);
+            font-weight: 400;
+            font-family: inherit;
+            color: #fff;
+            background: #333333;
+            transition: filter 0.1s ease, background-color 0.1s ease, color 0.1s ease;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .hm-calc-btn:active {
-            background: #48484a;
+            filter: brightness(1.35);
         }
 
         .hm-calc-btn--fn {
@@ -2715,7 +2623,7 @@
         }
 
         .hm-calc-btn--fn:active {
-            background: #8e8e93;
+            background: #fff;
         }
 
         .hm-calc-btn--op {
@@ -2724,15 +2632,20 @@
         }
 
         .hm-calc-btn--op:active {
-            background: #e08e00;
+            background: #ffb340;
+        }
+
+        .hm-calc-btn--op-active {
+            background: #fff !important;
+            color: #ff9f0a !important;
         }
 
         .hm-calc-btn--zero {
             grid-column: span 2;
-        }
-
-        .hm-calc-spacer {
-            background: #2c2c2e;
+            aspect-ratio: 2 / 1;
+            border-radius: 999px;
+            justify-content: flex-start;
+            padding-left: clamp(24px, 8vw, 32px);
         }
 
     </style>
@@ -2740,6 +2653,10 @@
 <body class="chats-home-view">
 
     <div class="app-shell" id="appShell">
+
+    <header id="appTopbar"></header>
+
+    <div class="app-body">
 
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
@@ -2766,43 +2683,6 @@
 
     <!-- SAĞ ALAN -->
     <main class="main-content">
-        
-        <!-- ÜST BAR -->
-        <div class="content-header">
-            <div class="header-left">
-                <button type="button" class="menu-toggle" onclick="toggleSidebar()" aria-label="Menüyü aç">☰</button>
-                <div id="headerTitleChat" class="header-title">
-                    <div class="avatar" id="activeChatAvatar">W</div>
-                    <div class="header-chat-text">
-                        <div id="activeChatName">Sohbetler</div>
-                        <div id="activeChatStatus" hidden></div>
-                    </div>
-                </div>
-                <div id="headerTitleProfile" class="header-title" style="display: none;">
-                    <div class="header-chat-text">
-                        <div id="headerProfileTabTitle">Profil Ayarları</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- SAĞ ÜST: BİLDİRİM + PP -->
-            <div class="header-right">
-                <div class="header-bell-wrapper">
-                    <button type="button" class="header-bell-btn" id="notificationBellBtn" aria-label="Bildirimler">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-14 0v5l-2 2v1h18v-1l-2-2Z"/>
-                        </svg>
-                    </button>
-                    <span class="notification-badge" id="notificationBadge" hidden>0</span>
-                    <div class="notification-dropdown" id="notificationDropdown"></div>
-                </div>
-
-                <div class="header-profile-wrapper">
-                    <button type="button" class="header-pp" id="headerProfilePic" aria-label="Profil menüsü" aria-haspopup="true">B</button>
-                    <div class="profile-dropdown" id="profileDropdown"></div>
-                </div>
-            </div>
-        </div>
 
         <!-- SAĞ ÜSTTEN AÇILAN KİLOMETRE RADARI -->
         <div class="discover-radar-panel" id="radarPanel">
@@ -2861,7 +2741,7 @@
                                 <button type="button" class="notify-btn" id="profileAvatarBtn">Fotoğraf Değiştir</button>
                                 <button type="button" class="notify-btn notify-btn--danger" id="profileAvatarRemoveBtn" hidden>Kaldır</button>
                             </div>
-                            <p class="form-hint">JPEG, PNG veya WebP · en fazla 5 MB (yüklenirken sıkıştırılır)</p>
+                            <p class="form-hint">JPEG, PNG veya WebP · en fazla 5 MB</p>
                         </div>
                         <input type="file" id="profileAvatarInput" hidden accept="image/jpeg,image/png,image/webp">
                     </div>
@@ -2915,6 +2795,8 @@
             </div>
         </div>
     </main>
+
+    </div><!-- /.app-body -->
 
     <!-- UYGULAMA İÇİ LİNK GÖRÜNTÜLEYİCİ -->
     <div class="link-viewer" id="linkViewer" aria-hidden="true">
@@ -3108,10 +2990,10 @@
         <div class="hm-calc">
             <div class="hm-calc-display" id="hmDisplay">0</div>
             <div class="hm-calc-grid" id="hmKeypad">
-                <button type="button" class="hm-calc-btn hm-calc-btn--fn" data-hm-action="C">C</button>
-                <span class="hm-calc-spacer" aria-hidden="true"></span>
-                <span class="hm-calc-spacer" aria-hidden="true"></span>
-                <button type="button" class="hm-calc-btn hm-calc-btn--op" data-hm-action="×">×</button>
+                <button type="button" class="hm-calc-btn hm-calc-btn--fn" data-hm-action="C">AC</button>
+                <button type="button" class="hm-calc-btn hm-calc-btn--fn" data-hm-action="±">±</button>
+                <button type="button" class="hm-calc-btn hm-calc-btn--fn" data-hm-action="%">%</button>
+                <button type="button" class="hm-calc-btn hm-calc-btn--op" data-hm-action="÷">÷</button>
                 <button type="button" class="hm-calc-btn" data-hm-action="7">7</button>
                 <button type="button" class="hm-calc-btn" data-hm-action="8">8</button>
                 <button type="button" class="hm-calc-btn" data-hm-action="9">9</button>
