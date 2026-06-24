@@ -103,8 +103,6 @@ async function handlePush(event) {
         renotify: count > 1,
         silent: false,
         data: {
-            chatType: payload.chatType || null,
-            district: payload.district || null,
             userId: payload.userId || null,
             username: payload.username || null,
             count
@@ -134,23 +132,6 @@ self.addEventListener('notificationclick', (event) => {
     );
 });
 
-const DISTRICT_SLUG_ALIASES = {
-    'İstanbul Anadolu': 'istanbul-anadolu',
-    'İstanbul Avrupa': 'istanbul-avrupa'
-};
-
-function slugDistrict(district) {
-    if (!district) return '';
-    if (DISTRICT_SLUG_ALIASES[district]) return DISTRICT_SLUG_ALIASES[district];
-    return district
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/\p{M}/gu, '')
-        .replace(/ı/g, 'i')
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-}
-
 function slugUsername(username) {
     return username
         .toLowerCase()
@@ -161,13 +142,10 @@ function slugUsername(username) {
 }
 
 function buildNotifyUrl(data) {
-    if (data.chatType === 'group' && data.district) {
-        return `/${slugDistrict(data.district)}`;
-    }
-    if (data.chatType === 'dm' && data.username) {
+    if (data.username) {
         return `/uye/${slugUsername(data.username)}`;
     }
-    if (data.chatType === 'dm' && data.userId) {
+    if (data.userId) {
         return `/?notify=u/${data.userId}`;
     }
     return '/';

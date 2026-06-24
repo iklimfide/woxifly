@@ -2,7 +2,7 @@
 export const SITE_URL = 'https://woxifly.com';
 export const SITE_NAME = 'Woxifly';
 export const SITE_DESCRIPTION =
-    'Gizliliğe önem veren ilçe bazlı mesajlaşma platformu. İstanbul ilçe odalarında sohbet, özel mesaj ve yakınındakiler — yakında tüm Türkiye.';
+    'Gizliliğe önem veren özel mesajlaşma platformu. Hesap makinesi kamuflajı ile güvenli sohbet.';
 export const SITE_OG_IMAGE = `${SITE_URL}/icons/icon-512.png`;
 
 export const CALC_TITLE = 'calculator';

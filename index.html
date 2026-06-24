@@ -11,7 +11,7 @@
     <link rel="icon" href="/favicon.png" type="image/png">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <title>Woxifly</title>
-    <meta name="description" content="Gizliliğe önem veren ilçe bazlı mesajlaşma platformu. İstanbul ilçe odalarında sohbet, özel mesaj ve yakınındakiler — yakında tüm Türkiye.">
+    <meta name="description" content="Gizliliğe önem veren özel mesajlaşma platformu. Hesap makinesi kamuflajı ile güvenli sohbet.">
     <meta name="application-name" content="Woxifly">
     <meta name="author" content="Woxifly">
     <meta name="robots" content="index, follow">
@@ -19,20 +19,20 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Woxifly">
     <meta property="og:title" content="Woxifly">
-    <meta property="og:description" content="Gizliliğe önem veren ilçe bazlı mesajlaşma platformu. İstanbul ilçe odalarında sohbet, özel mesaj ve yakınındakiler — yakında tüm Türkiye.">
+    <meta property="og:description" content="Gizliliğe önem veren özel mesajlaşma platformu. Hesap makinesi kamuflajı ile güvenli sohbet.">
     <meta property="og:url" content="https://woxifly.com/">
     <meta property="og:image" content="https://woxifly.com/icons/icon-512.png">
     <meta property="og:locale" content="tr_TR">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Woxifly">
-    <meta name="twitter:description" content="Gizliliğe önem veren ilçe bazlı mesajlaşma platformu. İstanbul ilçe odalarında sohbet, özel mesaj ve yakınındakiler — yakında tüm Türkiye.">
+    <meta name="twitter:description" content="Gizliliğe önem veren özel mesajlaşma platformu. Hesap makinesi kamuflajı ile güvenli sohbet.">
     <meta name="twitter:image" content="https://woxifly.com/icons/icon-512.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "WebApplication",
         "name": "Woxifly",
-        "description": "Gizliliğe önem veren ilçe bazlı mesajlaşma platformu. İstanbul ilçe odalarında sohbet, özel mesaj ve yakınındakiler.",
+        "description": "Gizliliğe önem veren özel mesajlaşma platformu. Hesap makinesi kamuflajı ile güvenli sohbet.",
         "url": "https://woxifly.com/",
         "applicationCategory": "CommunicationApplication",
         "operatingSystem": "Any",
@@ -49,6 +49,23 @@
             if (localStorage.getItem('hm_perde') === 'true') {
                 document.documentElement.classList.add('hm-active');
             }
+        })();
+    </script>
+    <script>
+        (function () {
+            var sensitive = ['email', 'password', 'passwd', 'token', 'access_token', 'refresh_token'];
+            var params = new URLSearchParams(window.location.search);
+            var changed = false;
+            sensitive.forEach(function (key) {
+                if (params.has(key)) {
+                    params.delete(key);
+                    changed = true;
+                }
+            });
+            if (!changed) return;
+            var qs = params.toString();
+            history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+            window.__woxiflyStrippedSensitiveQuery = true;
         })();
     </script>
     <style>
@@ -115,6 +132,12 @@
             .app-shell { box-shadow: none; }
         }
 
+        body:not(.user-authenticated) #appTopbar,
+        body:not(.user-authenticated) .app-body {
+            visibility: hidden;
+            pointer-events: none;
+        }
+
         /* --- MOBİL: yan menü çekmece --- */
         .sidebar-overlay {
             display: none;
@@ -146,7 +169,7 @@
         .sidebar.open { transform: translateX(0); }
 
         body.chat-open-view .sidebar:not(.open),
-        body:not(.chats-home-view):not(.radar-open-view) .sidebar:not(.open) {
+        body:not(.chats-home-view) .sidebar:not(.open) {
             transform: translateX(-105%);
         }
 
@@ -194,8 +217,6 @@
         .chat-item:active, .chat-item.active { background-color: #f7fafc; }
         .chat-item.active { border-left: 4px solid var(--accent-color); padding-left: 12px; }
 
-        .chat-item.district-group-item { background-color: #f0f7ff; border-bottom: 1px solid #d0e7ff; }
-        .chat-item.district-group-item .avatar { background: linear-gradient(135deg, #ff9800, #e65100); color: white; border: none; }
         
         .avatar { width: 42px; height: 42px; border-radius: 50%; background-color: #edf2f7; margin-right: 12px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: var(--accent-color); border: 1px solid var(--border-color); flex-shrink: 0; }
         .chat-info { flex: 1; overflow: hidden; min-width: 0; }
@@ -216,7 +237,6 @@
             display: none !important;
         }
 
-        body.chats-home-view .discover-radar-panel,
         body.chats-home-view .view-panel {
             display: none !important;
         }
@@ -236,63 +256,13 @@
             display: none;
         }
 
-        body.chat-open-view .sidebar.open .sidebar-close-btn,
-        body.radar-open-view .sidebar.open .sidebar-close-btn {
+        body.chat-open-view .sidebar.open .sidebar-close-btn {
             display: flex;
-        }
-
-        body.radar-open-view .main-content {
-            display: flex;
-        }
-
-        body.radar-open-view .sidebar {
-            transform: translateX(-105%) !important;
-        }
-
-        body.radar-open-view #messageContainer,
-        body.radar-open-view #messageInputArea,
-        body.radar-open-view #messageSelectionBar {
-            display: none !important;
-        }
-
-        body.radar-open-view .discover-radar-panel.open {
-            position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            top: 0;
-            max-height: none;
-            z-index: 150;
-            transform: none;
-        }
-
-        .discover-radar-panel {
-            max-width: 100%;
-            overflow-x: hidden;
-        }
-
-        .discovered-users-carousel {
-            max-width: 100%;
         }
 
         .notification-dropdown {
             max-width: calc(100vw - 16px);
         }
-
-        .sidebar-discover-slot {
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .sidebar-footer { padding: 0 0 calc(var(--safe-bottom)); border-top: 1px solid var(--border-color); background-color: #f8fafc; }
-        .sidebar-footer .list-section-title { border-top: none; }
-        .find-nearby-btn {
-            width: 100%;
-            min-height: 48px;
-            background: linear-gradient(to bottom, var(--gradient-blue-start), var(--gradient-blue-end));
-            color: white; border: none; padding: 12px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 10px rgba(48, 148, 230, 0.2);
-        }
-        .find-nearby-btn:active { transform: scale(0.98); }
 
         /* --- ANA İÇERİK --- */
         .main-content { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; min-width: 0; width: 100%; max-width: 100%; }
@@ -457,49 +427,7 @@
 
         .notification-action-btn:active { background: #f1f5f9; }
 
-        /* RADAR */
-        .discover-radar-panel {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            background: #ffffff;
-            border-bottom: 1px solid var(--border-color);
-            box-shadow: 0 10px 15px rgba(0,0,0,0.05);
-            z-index: 5;
-            padding: 14px 12px;
-            max-height: calc(100vh - var(--header-h) - 120px);
-            overflow-y: auto;
-            transform: translateY(-110%);
-            transition: transform 0.3s ease-in-out;
-        }
-        .discover-radar-panel.open { transform: translateY(0); }
-        .radar-header { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
-        .radar-title { font-weight: 700; font-size: 0.92rem; }
-        .radar-range-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
-        .radar-btn { background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 8px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; cursor: pointer; min-height: 36px; }
-        .radar-btn.active { background-color: var(--accent-color); color: white; border-color: var(--accent-color); }
-        .discovered-users-carousel { display: flex; gap: 12px; overflow-x: auto; padding: 4px 0 8px; -webkit-overflow-scrolling: touch; scroll-snap-type: x mandatory; }
-        .radar-close-btn {
-            width: 100%;
-            min-height: 44px;
-            margin-top: 12px;
-            border: none;
-            border-radius: 8px;
-            background: linear-gradient(to bottom, var(--gradient-blue-start), var(--gradient-blue-end));
-            color: white;
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        .radar-close-btn:active { transform: scale(0.98); }
-        
-        .user-discover-card { background: #f8fafc; border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; min-width: 140px; scroll-snap-align: start; text-align: center; cursor: pointer; flex-shrink: 0; }
-        .user-discover-card:active { border-color: var(--accent-color); background: #ffffff; }
-        .card-avatar { width: 40px; height: 40px; border-radius: 50%; background: #e2e8f0; color: var(--accent-color); font-weight: bold; display: flex; align-items: center; justify-content: center; margin: 0 auto 8px auto; overflow: hidden; }
-        .card-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%; }
-        .card-dist { font-size: 0.75rem; color: #10b981; font-weight: 600; }
 
         /* MESAJLAŞMA */
         .view-panel { display: none; flex-direction: column; flex: 1; min-height: 0; }
@@ -1609,7 +1537,6 @@
         .profile-card { background: #ffffff; width: 100%; max-width: 600px; padding: 20px 16px; border-radius: 12px; border: 1px solid var(--border-color); height: fit-content; }
         .form-group { margin-bottom: 16px; }
         .form-group label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 8px; color: #4a5568; }
-        .abroad-city-field[hidden] { display: none !important; }
         .form-group input, .form-group select { width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background-color: #f7fafc; font-size: 16px; }
 
         .password-field {
@@ -1766,8 +1693,7 @@
             background: #fff;
         }
 
-        .cloud-toolbar input,
-        .cloud-toolbar select {
+        .cloud-toolbar input {
             flex: 1 1 140px;
             min-width: 0;
             padding: 10px 12px;
@@ -2032,10 +1958,8 @@
             inset: 0;
             background: rgba(15, 23, 42, 0.55);
             z-index: 480;
-            padding: 12px;
-            padding-top: max(12px, env(safe-area-inset-top));
-            padding-bottom: max(12px, env(safe-area-inset-bottom));
-            align-items: flex-end;
+            padding: 0;
+            align-items: stretch;
             justify-content: center;
         }
 
@@ -2045,145 +1969,173 @@
 
         .welcome-modal {
             width: 100%;
-            max-width: 520px;
-            max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-            background: #ffffff;
-            border-radius: 16px 16px 12px 12px;
-            border: 1px solid var(--border-color);
-            box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
+            max-width: 480px;
+            max-height: 100%;
+            background: var(--bg-light);
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
             transform: translateY(110%);
             transition: transform 0.28s ease;
+            position: relative;
         }
 
         .welcome-modal-overlay.open .welcome-modal {
             transform: translateY(0);
         }
 
-        .welcome-modal-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 14px 16px;
-            background: linear-gradient(to bottom, var(--gradient-blue-start), var(--gradient-blue-end));
-            color: white;
-            flex-shrink: 0;
+        .welcome-modal-hero {
+            background: linear-gradient(135deg, var(--gradient-blue-start), var(--gradient-blue-end));
+            color: #ffffff;
+            padding: 44px 24px 36px;
+            text-align: center;
+            border-bottom-left-radius: 24px;
+            border-bottom-right-radius: 24px;
         }
 
-        .welcome-modal-header h2 {
-            font-size: 1.05rem;
-            font-weight: 700;
-            line-height: 1.3;
+        .welcome-modal-hero h2 {
+            font-size: 1.65rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+            line-height: 1.2;
         }
 
-        .welcome-modal-header h2 span { color: #c4f9da; }
+        .welcome-modal-hero h2 span {
+            color: #c4f9da;
+        }
 
-        .welcome-modal-close {
-            width: 36px;
-            height: 36px;
-            border: none;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.18);
-            color: white;
-            font-size: 1.4rem;
-            line-height: 1;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
+        .welcome-modal-tagline {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #ffffff;
+            opacity: 0.98;
+            margin-bottom: 14px;
+            line-height: 1.45;
+        }
+
+        .welcome-modal-badge {
+            display: inline-block;
+            background-color: rgba(255, 255, 255, 0.2);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
         }
 
         .welcome-modal-body {
-            flex: 1;
-            min-height: 0;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-            padding: 16px;
+            padding: 20px 18px 24px;
+            padding-bottom: max(24px, env(safe-area-inset-bottom));
         }
 
         .welcome-modal-lead {
-            font-size: 0.88rem;
-            color: #475569;
-            line-height: 1.5;
-            margin-bottom: 16px;
+            font-size: 0.9rem;
+            color: var(--text-main);
+            text-align: center;
+            line-height: 1.55;
+            margin-bottom: 20px;
+            padding: 0 4px;
         }
 
-        .welcome-feature {
-            margin-bottom: 14px;
-        }
-
-        .welcome-feature:last-child {
-            margin-bottom: 0;
-        }
-
-        .welcome-feature-title {
-            font-size: 0.82rem;
-            font-weight: 700;
-            color: #1e293b;
-            margin-bottom: 6px;
-        }
-
-        .welcome-feature-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
-
-        .welcome-feature-list li {
-            position: relative;
-            padding-left: 14px;
-            font-size: 0.8rem;
-            color: #64748b;
-            line-height: 1.45;
-            margin-bottom: 4px;
-        }
-
-        .welcome-feature-list li::before {
-            content: '•';
-            position: absolute;
-            left: 0;
-            color: var(--accent-color);
-            font-weight: 700;
-        }
-
-        .welcome-modal-footer {
+        .welcome-features-grid {
             display: flex;
-            gap: 10px;
-            padding: 12px 16px;
-            padding-bottom: max(12px, env(safe-area-inset-bottom));
-            border-top: 1px solid var(--border-color);
-            background: #f8fafc;
-            flex-shrink: 0;
+            flex-direction: column;
+            gap: 16px;
         }
 
-        .welcome-modal-btn {
-            flex: 1;
-            min-height: 44px;
-            border-radius: 10px;
-            font-size: 0.88rem;
+        .welcome-feature-card {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 22px 20px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .welcome-feature-card-icon {
+            margin-bottom: 12px;
+            font-size: 2rem;
+            line-height: 1;
+        }
+
+        .welcome-feature-card h4 {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 8px;
+        }
+
+        .welcome-feature-card p {
+            font-size: 0.84rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-bottom: 14px;
+            max-width: 92%;
+        }
+
+        .welcome-feature-card-cta {
+            display: inline-block;
+            background: #ffffff;
+            color: var(--accent-color);
+            border: 1.5px solid var(--accent-color);
+            padding: 8px 20px;
+            border-radius: 24px;
+            font-size: 0.78rem;
             font-weight: 600;
+            letter-spacing: 0.3px;
             cursor: pointer;
-            border: 1px solid transparent;
+            font-family: inherit;
+        }
+
+        .welcome-feature-card-cta:active {
+            background: #eef6ff;
+            transform: translateY(1px);
+        }
+
+        .welcome-modal-action {
+            margin-top: 24px;
+            text-align: center;
         }
 
         .welcome-modal-btn--primary {
+            display: block;
+            width: 100%;
+            min-height: 48px;
             background: linear-gradient(to bottom, var(--gradient-blue-start), var(--gradient-blue-end));
-            color: white;
-            border-color: #1a6cb1;
+            color: #ffffff;
+            border: 1px solid #1a6cb1;
+            padding: 14px 16px;
+            border-radius: 16px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(46, 138, 221, 0.2);
         }
 
-        .welcome-modal-btn--secondary {
-            background: #ffffff;
+        .welcome-modal-btn--primary:active {
+            opacity: 0.92;
+            transform: scale(0.99);
+        }
+
+        .welcome-modal-login-link {
+            display: inline-block;
+            margin-top: 14px;
+            padding: 8px 4px;
+            border: none;
+            background: none;
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .welcome-modal-login-link strong {
             color: var(--accent-color);
-            border-color: #b7dbf7;
-        }
-
-        .welcome-modal-btn:active {
-            transform: scale(0.98);
+            font-weight: 600;
         }
 
         /* --- GİRİŞ / KAYIT MODAL --- */
@@ -2228,7 +2180,7 @@
         .auth-modal-header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: center;
             padding: 14px 16px;
             background: linear-gradient(to bottom, var(--gradient-blue-start), var(--gradient-blue-end));
             color: white;
@@ -2241,21 +2193,6 @@
         }
 
         .auth-modal-header h3 span { color: #c4f9da; }
-
-        .auth-modal-close {
-            width: 36px;
-            height: 36px;
-            border: none;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.18);
-            color: white;
-            font-size: 1.4rem;
-            line-height: 1;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
 
         .auth-modal-body {
             overflow-y: auto;
@@ -2967,12 +2904,6 @@
             </div>
             
             <div class="chat-list">
-                <div class="sidebar-discover-slot">
-                    <button class="find-nearby-btn" onclick="toggleRadarPanel()">
-                        📍 Yakınındakileri Bul
-                    </button>
-                </div>
-
                 <div class="list-section-title" id="dmListSectionTitle" hidden>Sohbetler</div>
                 <div id="myActiveChatsList"></div>
             </div>
@@ -2981,21 +2912,6 @@
 
     <!-- SAĞ ALAN -->
     <main class="main-content">
-
-        <!-- SAĞ ÜSTTEN AÇILAN KİLOMETRE RADARI -->
-        <div class="discover-radar-panel" id="radarPanel">
-            <div class="radar-header">
-                <div class="radar-title">🛰️ Çevrendeki Kullanıcıları Bul</div>
-                <div class="radar-range-buttons">
-                    <button class="radar-btn" id="r-10" onclick="searchRadar(10)">0-10 km</button>
-                    <button class="radar-btn" id="r-20" onclick="searchRadar(20)">0-20 km</button>
-                    <button class="radar-btn" id="r-50" onclick="searchRadar(50)">0-50 km</button>
-                    <button class="radar-btn active" id="r-all" onclick="searchRadar('all')">Tüm iller</button>
-                </div>
-            </div>
-            <div class="discovered-users-carousel" id="radarCarousel"></div>
-            <button type="button" class="radar-close-btn" id="radarCloseBtn" onclick="closeRadarPanel()">Kapat</button>
-        </div>
 
         <!-- PANEL 1: CHAT -->
         <div id="chat-panel" class="view-panel active">
@@ -3045,20 +2961,6 @@
                         <input type="file" id="profileAvatarInput" hidden accept="image/jpeg,image/png,image/webp">
                     </div>
                     <div class="form-group"><label>Rumuz</label><input type="text" id="usernameInput" value="Ben"></div>
-                    <div class="form-group">
-                        <label for="districtInput">Konum</label>
-                        <select id="districtInput"></select>
-                    </div>
-                    <div class="form-group abroad-city-field" id="profileAbroadCityWrap" hidden>
-                        <label for="profileAbroadCityInput">Şehir (isteğe bağlı)</label>
-                        <input type="text" id="profileAbroadCityInput" maxlength="80" placeholder="örn. Berlin, Londra" autocomplete="address-level2">
-                    </div>
-                    <div class="form-group">
-                        <label class="visibility-toggle">
-                            <input type="checkbox" id="isVisibleInput">
-                            <span>Yakınımdakiler aramasında görünür ol (radar)</span>
-                        </label>
-                    </div>
 
                     <hr class="profile-divider">
                     <h3 class="profile-section-title">Kamuflaj</h3>
@@ -3097,11 +2999,6 @@
                 <aside class="cloud-sidebar">
                     <div class="cloud-toolbar">
                         <input type="search" id="cloudSearchInput" placeholder="Sohbet veya rumuz ara…" autocomplete="off">
-                        <select id="cloudTypeFilter" aria-label="Sohbet türü">
-                            <option value="all">Tümü</option>
-                            <option value="group">Grup</option>
-                            <option value="dm">Özel</option>
-                        </select>
                         <button type="button" id="cloudRefreshBtn">Yenile</button>
                     </div>
                     <div class="cloud-status" id="cloudStatus">Sohbetler yükleniyor…</div>
@@ -3167,55 +3064,52 @@
     <!-- HOŞ GELDİNİZ MODAL -->
     <div class="welcome-modal-overlay" id="welcomeModalOverlay" role="dialog" aria-modal="true" aria-labelledby="welcomeModalTitle">
         <div class="welcome-modal" id="welcomeModal">
-            <div class="welcome-modal-header">
-                <h2 id="welcomeModalTitle">Woxi<span>fly</span>'a Hoş Geldiniz</h2>
-                <button type="button" class="welcome-modal-close" id="welcomeModalClose" aria-label="Kapat">×</button>
+
+            <div class="welcome-modal-hero">
+                <h2 id="welcomeModalTitle">Woxi<span>fly</span></h2>
+                <p class="welcome-modal-tagline">Gerçek bir hesap makinesi arkasında gizlenmiş, kişiye özel sohbet</p>
+                <span class="welcome-modal-badge">🔒 Kamuflaj Aktif</span>
             </div>
+
             <div class="welcome-modal-body">
                 <p class="welcome-modal-lead">
-                    Şimdilik İstanbul ilçelerine göre organize edilmiş, gizliliğe önem veren bir mesajlaşma platformu — yakında tüm Türkiye.
-                    İlçe odalarında toplulukla konuşun, yakınınızdaki kişilerle özel sohbet başlatın.
+                    Size özel, hesap makinesi ile kamufle edilmiş yeni nesil mesajlaşma platformu. PIN bilmeden kimse mesajlarınıza erişemez.
                 </p>
 
-                <div class="welcome-feature">
-                    <div class="welcome-feature-title">📍 Keşfet ve bağlan</div>
-                    <ul class="welcome-feature-list">
-                        <li>İlçe genel odalarında anlık mesajlaşma</li>
-                        <li>10–50 km yarıçapında yakınındakileri bulma</li>
-                        <li>Şimdilik İstanbul ilçeleri — yakında tüm Türkiye</li>
-                    </ul>
+                <div class="welcome-features-grid">
+                    <div class="welcome-feature-card">
+                        <div class="welcome-feature-card-icon" aria-hidden="true">🧮</div>
+                        <h4>Hesap Makinesi Perdesi</h4>
+                        <p>Uygulamayı açan herkes tam işlevsel bir hesap makinesiyle karşılaşır. Dışarıdan bakan birinin gizli bir sohbet paneli olduğunu tahmin etmesi zordur.</p>
+                        <button type="button" class="welcome-feature-card-cta">Şifreyi Dene</button>
+                    </div>
+
+                    <div class="welcome-feature-card">
+                        <div class="welcome-feature-card-icon" aria-hidden="true">🔗</div>
+                        <h4>Özel Mesaj Linki</h4>
+                        <p>Her kullanıcının benzersiz bir profil linki vardır. Linki paylaşan biriyle doğrudan özel sohbet başlatabilirsiniz.</p>
+                        <button type="button" class="welcome-feature-card-cta">Başla</button>
+                    </div>
+
+                    <div class="welcome-feature-card">
+                        <div class="welcome-feature-card-icon" aria-hidden="true">💬</div>
+                        <h4>7 günde imha</h4>
+                        <p>Ses, resim ve video paylaşın. 7 günü dolduran mesajlar arkada dijital iz bırakmadan otomatik olarak silinir.</p>
+                        <button type="button" class="welcome-feature-card-cta">Yazışma</button>
+                    </div>
+
+                    <div class="welcome-feature-card">
+                        <div class="welcome-feature-card-icon" aria-hidden="true">📱</div>
+                        <h4>Ana Ekrana Ekle</h4>
+                        <p>Uygulama marketlerine gerek kalmadan telefonunuza tek tıkla kaydedin. Güvenli ağa dahil olmak için ücretsiz hesap oluşturun.</p>
+                        <button type="button" class="welcome-feature-card-cta">PWA Kur</button>
+                    </div>
                 </div>
 
-                <div class="welcome-feature">
-                    <div class="welcome-feature-title">💬 Mesajlaşma</div>
-                    <ul class="welcome-feature-list">
-                        <li>Metin, görsel, video ve sesli mesaj</li>
-                        <li>Alıntılama, iletme ve emoji tepkileri</li>
-                        <li>Özel sohbetler ve sohbet geçmişi</li>
-                    </ul>
+                <div class="welcome-modal-action">
+                    <button type="button" class="welcome-modal-btn--primary" id="welcomeRegisterBtn">Hemen Kaydol</button>
+                    <button type="button" class="welcome-modal-login-link" id="welcomeLoginBtn">Zaten bir hesabın var mı? <strong>Giriş Yap</strong></button>
                 </div>
-
-                <div class="welcome-feature">
-                    <div class="welcome-feature-title">🔔 Bildirimler ve gizlilik</div>
-                    <ul class="welcome-feature-list">
-                        <li>Bildirimlerde mesaj içeriği gösterilmez</li>
-                        <li>Aynı kişiden gelen uyarılar birleştirilir</li>
-                        <li>Radar görünürlüğünü profilden kapatabilirsiniz</li>
-                    </ul>
-                </div>
-
-                <div class="welcome-feature">
-                    <div class="welcome-feature-title">📱 Kullanım</div>
-                    <ul class="welcome-feature-list">
-                        <li>Mobil uyumlu arayüz, ana ekrana eklenebilir (PWA)</li>
-                        <li>Giriş yapmadan ilçe odalarını okuyabilirsiniz</li>
-                        <li>Mesaj göndermek ve özel sohbet için ücretsiz hesap gerekir</li>
-                    </ul>
-                </div>
-            </div>
-            <div class="welcome-modal-footer">
-                <button type="button" class="welcome-modal-btn welcome-modal-btn--secondary" id="welcomeLoginBtn">Giriş Yap</button>
-                <button type="button" class="welcome-modal-btn welcome-modal-btn--primary" id="welcomeRegisterBtn">Kayıt Ol</button>
             </div>
         </div>
     </div>
@@ -3225,7 +3119,6 @@
         <div class="auth-modal" id="authModal">
             <div class="auth-modal-header">
                 <h3 id="authModalTitle">Woxi<span>fly</span></h3>
-                <button type="button" class="auth-modal-close" id="authModalClose" aria-label="Kapat">×</button>
             </div>
             <div class="auth-modal-body">
                 <div class="auth-tabs">
@@ -3234,7 +3127,7 @@
                 </div>
 
                 <div id="login-panel" class="auth-panel active">
-                    <form id="login-form">
+                    <form id="login-form" method="post" action="#" autocomplete="on">
                         <div class="form-group">
                             <label for="login-email">E-posta</label>
                             <input type="email" id="login-email" name="email" autocomplete="email" required placeholder="ornek@email.com">
@@ -3255,18 +3148,10 @@
                 </div>
 
                 <div id="register-panel" class="auth-panel">
-                    <form id="register-form">
+                    <form id="register-form" method="post" action="#" autocomplete="on">
                         <div class="form-group">
                             <label for="register-username">Rumuz</label>
                             <input type="text" id="register-username" name="username" autocomplete="username" required minlength="2" maxlength="24" placeholder="Örn: SiberMimar">
-                        </div>
-                        <div class="form-group">
-                            <label for="register-district">Konum</label>
-                            <select id="register-district" name="district" required></select>
-                        </div>
-                        <div class="form-group abroad-city-field" id="registerAbroadCityWrap" hidden>
-                            <label for="registerAbroadCityInput">Şehir (isteğe bağlı)</label>
-                            <input type="text" id="registerAbroadCityInput" name="abroad_city" maxlength="80" placeholder="örn. Berlin, Londra" autocomplete="address-level2">
                         </div>
                         <div class="form-group">
                             <label for="register-email">E-posta</label>

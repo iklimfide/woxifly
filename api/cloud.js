@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { verifyAuthToken } from './_lib/auth.js';
-import { isAdminUser } from './_lib/admin.js';
+import { isAdminUser, describeAdminDenial } from './_lib/admin.js';
 import { getSupabaseServiceConfig } from './_lib/env.js';
 
 function sendJson(res, status, body) {
@@ -32,9 +32,6 @@ function previewBody(message) {
 }
 
 function conversationTitle(conversation, memberNames = []) {
-    if (conversation.type === 'group') {
-        return `${conversation.district || 'Grup'} Odası`;
-    }
     if (memberNames.length) return memberNames.join(' ↔ ');
     return 'Özel Sohbet';
 }
@@ -86,7 +83,7 @@ async function requireAdmin(req, res) {
     if (!isAdminUser(auth.user)) {
         sendJson(res, 403, {
             error: 'Bulut YP erişimi yok.',
-            hint: 'Vercel ortam değişkenlerinde ADMIN_EMAILS veya MASTER_USER (giriş e-postanız) tanımlı olmalı.'
+            hint: describeAdminDenial(auth.user)
         });
         return null;
     }
@@ -103,22 +100,16 @@ async function handleAccess(res, user) {
 }
 
 async function handleConversations(client, query, res) {
-    const typeFilter = (query.type || 'all').toLowerCase();
     const search = (query.q || '').trim().toLowerCase();
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 80, 1), 200);
     const offset = Math.max(parseInt(query.offset, 10) || 0, 0);
 
     let convQuery = client
         .from('conversations')
-        .select('id, type, district, created_at')
+        .select('id, type, created_at')
+        .eq('type', 'dm')
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
-
-    if (typeFilter === 'group') {
-        convQuery = convQuery.eq('type', 'group');
-    } else if (typeFilter === 'dm') {
-        convQuery = convQuery.eq('type', 'dm');
-    }
 
     const { data: conversations, error: convError } = await convQuery;
     if (convError) {
@@ -180,7 +171,6 @@ async function handleConversations(client, query, res) {
         return {
             id: conversation.id,
             type: conversation.type,
-            district: conversation.district,
             title,
             memberUsernames: memberNames,
             lastAt: latest?.created_at || conversation.created_at,
@@ -195,7 +185,6 @@ async function handleConversations(client, query, res) {
         items = items.filter((item) => {
             const haystack = [
                 item.title,
-                item.district,
                 item.preview,
                 ...(item.memberUsernames || [])
             ].join(' ').toLowerCase();
@@ -258,7 +247,7 @@ async function handleMessages(client, query, res) {
 
     const { data: conversation, error: convError } = await client
         .from('conversations')
-        .select('id, type, district')
+        .select('id, type')
         .eq('id', conversationId)
         .maybeSingle();
 
@@ -268,21 +257,18 @@ async function handleMessages(client, query, res) {
     }
 
     let memberUsernames = [];
-    if (conversation.type === 'dm') {
-        try {
-            const membersByConv = await loadMemberUsernamesByConversation(client, [conversationId]);
-            memberUsernames = membersByConv.get(conversationId) || [];
-        } catch (err) {
-            sendJson(res, 500, { error: err.message });
-            return;
-        }
+    try {
+        const membersByConv = await loadMemberUsernamesByConversation(client, [conversationId]);
+        memberUsernames = membersByConv.get(conversationId) || [];
+    } catch (err) {
+        sendJson(res, 500, { error: err.message });
+        return;
     }
 
     sendJson(res, 200, {
         conversation: {
             id: conversation.id,
             type: conversation.type,
-            district: conversation.district,
             title: conversationTitle(conversation, memberUsernames),
             memberUsernames
         },

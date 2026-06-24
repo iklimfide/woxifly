@@ -26,8 +26,6 @@ export async function sendMaskedPush(subscription, navigationData) {
 
     const payload = JSON.stringify({
         tag: navigationData.tag || `woxifly-${Date.now()}`,
-        chatType: navigationData.chatType,
-        district: navigationData.district || null,
         userId: navigationData.userId || null,
         username: navigationData.username || null
     });

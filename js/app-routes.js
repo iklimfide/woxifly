@@ -1,5 +1,3 @@
-import { locationToRoomSlug, roomSlugToLocation } from './config.js';
-
 const RESERVED_TOP_LEVEL = new Set(['uye', 'profil', 'profile', 'sohbetler', 'chats', 'bulut']);
 
 export function usernameToSlug(username) {
@@ -12,19 +10,10 @@ export function usernameToSlug(username) {
         .replace(/[^a-z0-9._-]+/g, '');
 }
 
-export function roomSlugToDistrict(slug) {
-    return roomSlugToLocation(slug);
-}
-
 export function buildAppPath({ activePanel, currentActiveChat, username } = {}) {
     if (activePanel === 'profile-panel') return '/profil';
     if (activePanel === 'bulut-panel') return '/bulut';
     if (!currentActiveChat) return '/';
-
-    if (currentActiveChat.startsWith('Group-')) {
-        const district = currentActiveChat.replace('Group-', '');
-        return `/${locationToRoomSlug(district)}`;
-    }
 
     if (currentActiveChat.startsWith('User-') && username) {
         const slug = usernameToSlug(username);
@@ -54,14 +43,6 @@ export function parseAppPath(pathname) {
         return { usernameSlug: decodeURIComponent(dmMatch[1]).toLowerCase() };
     }
 
-    const slug = path.slice(1);
-    if (slug && !slug.includes('/') && !RESERVED_TOP_LEVEL.has(slug.toLowerCase())) {
-        const district = roomSlugToLocation(slug);
-        if (district) {
-            return { chatId: `Group-${district}` };
-        }
-    }
-
     return null;
 }
 
@@ -75,10 +56,6 @@ export function parseLegacyHash(hash) {
 
     const [type, ...rest] = raw.split('/');
     const value = decodeURIComponent(rest.join('/'));
-
-    if (type === 'g' && value) {
-        return { chatId: `Group-${value}` };
-    }
 
     if (type === 'u' && value) {
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {

@@ -22,28 +22,15 @@ import {
 } from './media/index.js';
 import { compressImageForAvatar, compressImageForChat } from './media/compress-image.js';
 import {
-    getLocationCoords,
-    populateLocationSelect,
-    loadLocations,
-    formatGroupRoomTitle,
     DEFAULT_LOCATION,
-    MESSAGE_HISTORY_LIMIT,
-    ABROAD_LOCATION,
-    isAbroadLocation
+    MESSAGE_HISTORY_LIMIT
 } from './config.js';
 import {
-    initAbroadCityField,
-    formatRadarDistanceLabel,
-    readAbroadCityInput
-} from './location-abroad.js';
-import {
-    joinGroupRoom,
     joinDmRoom,
     leaveRealtimeRoom,
     broadcastShout,
     broadcastReaction,
-    broadcastMessageDelete,
-    updatePresenceTrack
+    broadcastMessageDelete
 } from './realtime-chat.js';
 import { sanitizeText, isValidUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles, appendMessageToContainer, createMessageDateSeparator, getCalendarDayKey } from './utils.js';
 import {
@@ -139,18 +126,12 @@ let currentUserId = null;
 let pendingForward = null;
 let pendingForwardSourceChat = null;
 let pendingComposerMedia = null;
-let currentMyDistrict = DEFAULT_LOCATION;
-let currentMyAbroadCity = null;
 let currentMyUsername = 'Misafir';
-let currentMyIsVisible = false;
 let currentMyAvatarUrl = null;
 let currentMyAvatarR2Key = null;
 let currentActiveChat = null;
 let currentConversationId = null;
-let currentGroupDistrict = null;
-let radarOpenedFromHome = false;
 let profileReadyPromise = Promise.resolve();
-let radarSearchId = 0;
 let messageHistoryLoadId = 0;
 const dmConversations = new Map();
 const dmTitles = new Map();
@@ -230,11 +211,11 @@ async function openDmByUserId(userId, usernameHint = null, avatarUrl = null) {
         }
         dmConversations.set(userId, convId);
         if (!document.getElementById(`user-${userId}`)) {
-            addDmToSidebar(userId, username, '—');
+            addDmToSidebar(userId, username, '');
         }
     }
 
-    await openChat(`User-${userId}`, username, 'Özel Sohbet', { avatarUrl });
+    await openChat(`User-${userId}`, username, { avatarUrl });
 }
 
 async function openDmByUsernameSlug(usernameSlug) {
@@ -265,10 +246,6 @@ async function restoreAppRoute(route) {
             return;
         }
         switchView('profile-panel');
-        if (!currentActiveChat?.startsWith('Group-')) {
-            currentActiveChat = `Group-${currentMyDistrict}`;
-            subscribeGroupRealtime(currentMyDistrict);
-        }
         saveAppRoute();
         return;
     }
@@ -283,12 +260,6 @@ async function restoreAppRoute(route) {
             await showChatListHome();
             replaceAppPath('/');
         }
-        return;
-    }
-
-    if (route.chatId?.startsWith('Group-')) {
-        const district = route.chatId.replace('Group-', '');
-        await openChat(route.chatId, formatGroupRoomTitle(district), 'Grup odası');
         return;
     }
 
@@ -309,6 +280,10 @@ async function restoreAppRoute(route) {
 
 function isLoggedIn() {
     return !!currentUserId;
+}
+
+function syncAuthGateUi() {
+    document.body.classList.toggle('user-authenticated', isLoggedIn());
 }
 
 function promptLogin() {
@@ -381,91 +356,6 @@ function openProfileSettings() {
 
 function openCloudAdminPanel() {
     openCloudPanel();
-}
-
-function ensureRadarVisibilityNotifyActions() {
-    const footer = document.querySelector('.notify-modal-footer');
-    const okBtn = document.getElementById('notifyModalOk');
-    if (!footer || !okBtn) return null;
-
-    let settingsBtn = document.getElementById('notifyModalRadarSettingsBtn');
-    if (!settingsBtn) {
-        settingsBtn = document.createElement('button');
-        settingsBtn.type = 'button';
-        settingsBtn.id = 'notifyModalRadarSettingsBtn';
-        settingsBtn.className = 'notify-modal-btn';
-        settingsBtn.textContent = 'Ayarlara Git';
-        settingsBtn.hidden = true;
-        settingsBtn.addEventListener('click', () => {
-            closeNotifyModal();
-            settingsBtn.hidden = true;
-            openProfileSettings();
-            requestAnimationFrame(() => {
-                document.getElementById('isVisibleInput')?.closest('.form-group')
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                document.getElementById('isVisibleInput')?.focus();
-            });
-        });
-        footer.insertBefore(settingsBtn, okBtn);
-    }
-
-    return settingsBtn;
-}
-
-function hideRadarVisibilityNotifyActions() {
-    const settingsBtn = document.getElementById('notifyModalRadarSettingsBtn');
-    if (settingsBtn) settingsBtn.hidden = true;
-}
-
-function promptEnableRadarVisibility() {
-    document.getElementById('radarPanel')?.classList.remove('open');
-
-    const settingsBtn = ensureRadarVisibilityNotifyActions();
-    if (settingsBtn) settingsBtn.hidden = false;
-
-    showNotify(
-        'Yakınımdakileri bul özelliğini kullanabilmek için profilden "Yakınımdakiler aramasında görünür ol" ayarını açmanız gerekiyor.',
-        { title: 'Ayar gerekli', type: 'warning' }
-    );
-
-    const hideActions = () => hideRadarVisibilityNotifyActions();
-    document.getElementById('notifyModalOk')?.addEventListener('click', hideActions, { once: true });
-    document.getElementById('notifyModalClose')?.addEventListener('click', hideActions, { once: true });
-}
-
-async function ensureRadarVisible() {
-    await profileReadyPromise;
-
-    if (currentMyIsVisible) return true;
-
-    const checkbox = document.getElementById('isVisibleInput');
-    if (checkbox?.checked) {
-        currentMyIsVisible = true;
-        return true;
-    }
-
-    if (currentUserId) {
-        const { data } = await supabase
-            .from('profiles')
-            .select('is_visible')
-            .eq('id', currentUserId)
-            .maybeSingle();
-
-        if (data?.is_visible === true) {
-            currentMyIsVisible = true;
-            if (checkbox) checkbox.checked = true;
-            return true;
-        }
-    }
-
-    promptEnableRadarVisibility();
-    return false;
-}
-
-function initProfileVisibility() {
-    document.getElementById('isVisibleInput')?.addEventListener('change', (event) => {
-        currentMyIsVisible = event.target.checked === true;
-    });
 }
 
 function initProfileAvatar() {
@@ -580,23 +470,6 @@ async function removeProfileAvatar() {
     refreshAvatarDisplays();
 }
 
-function populateDistrictSelects() {
-    populateLocationSelect(document.getElementById('districtInput'), currentMyDistrict);
-    populateLocationSelect(document.getElementById('register-district'), DEFAULT_LOCATION);
-    initAbroadCityField({
-        selectEl: document.getElementById('districtInput'),
-        wrapEl: document.getElementById('profileAbroadCityWrap'),
-        inputEl: document.getElementById('profileAbroadCityInput'),
-        initialDistrict: currentMyDistrict,
-        initialCity: currentMyAbroadCity
-    });
-    initAbroadCityField({
-        selectEl: document.getElementById('register-district'),
-        wrapEl: document.getElementById('registerAbroadCityWrap'),
-        inputEl: document.getElementById('registerAbroadCityInput')
-    });
-}
-
 function updateMessageInputState() {
     const input = document.getElementById('messageInput');
     if (!input) return;
@@ -640,7 +513,6 @@ window.closeSidebar = function () {
 };
 
 function showMainContentView() {
-    clearRadarMobileView();
     document.body.classList.remove('chats-home-view');
     document.body.classList.add('chat-open-view');
     closeSidebar();
@@ -690,125 +562,14 @@ window.checkEnter = function (event) {
     if (event.key === 'Enter') sendMessage();
 };
 
-function restoreRadarMobileHomeView() {
-    if (!radarOpenedFromHome) return;
-    radarOpenedFromHome = false;
-    document.body.classList.remove('radar-open-view');
-    document.body.classList.add('chats-home-view');
-}
-
-function clearRadarMobileView() {
-    radarOpenedFromHome = false;
-    document.body.classList.remove('radar-open-view');
-    document.getElementById('radarPanel')?.classList.remove('open');
-}
-
-function openRadarMobileFromHome() {
-    if (!isMobileLayout() || !document.body.classList.contains('chats-home-view')) return;
-    radarOpenedFromHome = true;
-    document.body.classList.remove('chats-home-view');
-    document.body.classList.add('radar-open-view');
-}
-
-window.toggleRadarPanel = async function () {
-    if (!isLoggedIn()) {
-        promptLogin();
-        return;
-    }
-
-    if (!(await ensureRadarVisible())) return;
-
-    const panel = document.getElementById('radarPanel');
-    const willOpen = !panel.classList.contains('open');
-
-    if (willOpen) {
-        if (isMobileLayout()) {
-            openRadarMobileFromHome();
-            closeSidebar();
-        }
-    } else {
-        restoreRadarMobileHomeView();
-    }
-
-    panel.classList.toggle('open');
-    if (panel.classList.contains('open')) searchRadar(DEFAULT_RADAR_RANGE);
-};
-
-window.closeRadarPanel = function () {
-    document.getElementById('radarPanel')?.classList.remove('open');
-    restoreRadarMobileHomeView();
-};
-
 window.saveProfile = saveProfile;
 window.openChat = openChat;
 window.sendMessage = sendMessage;
-window.searchRadar = searchRadar;
-window.startNewChat = startNewChat;
+
 function hasDmChatItems() {
     const list = document.getElementById('myActiveChatsList');
     if (!list) return false;
-    return !!list.querySelector('.chat-item:not(.district-group-item)');
-}
-
-function updateChatListDiscoverSlot() {
-    const slot = document.querySelector('.sidebar-discover-slot');
-    if (slot) {
-        slot.hidden = false;
-    }
-}
-
-function buildDistrictGroupItem() {
-    const isGroupActive = currentActiveChat === `Group-${currentMyDistrict}` ? 'active' : '';
-    const item = document.createElement('div');
-    item.className = `chat-item district-group-item ${isGroupActive}`;
-    item.id = 'groupTab';
-    item.addEventListener('click', () => {
-        openChat(`Group-${currentMyDistrict}`, formatGroupRoomTitle(currentMyDistrict), 'Grup odası');
-        closeSidebar();
-    });
-
-    const avatar = document.createElement('div');
-    avatar.className = 'avatar';
-    avatar.textContent = '#';
-
-    const info = document.createElement('div');
-    info.className = 'chat-info';
-
-    const top = document.createElement('div');
-    top.className = 'chat-info-top';
-    const name = document.createElement('span');
-    name.className = 'chat-name';
-    name.textContent = formatGroupRoomTitle(currentMyDistrict);
-    top.appendChild(name);
-
-    const preview = document.createElement('div');
-    preview.className = 'chat-preview';
-    preview.textContent = 'Bu bölgedeki ortak yazışma alanı.';
-
-    info.append(top, preview);
-    item.append(avatar, info);
-    return item;
-}
-
-function updateDistrictGroupTab() {
-    const footer = document.getElementById('dynamicGroupTabContainer');
-    const list = document.getElementById('myActiveChatsList');
-    const hasDms = hasDmChatItems();
-
-    document.getElementById('groupTab')?.remove();
-    if (footer) footer.innerHTML = '';
-
-    const item = buildDistrictGroupItem();
-
-    if (hasDms && footer) {
-        footer.hidden = false;
-        footer.appendChild(item);
-    } else if (list) {
-        if (footer) footer.hidden = true;
-        list.appendChild(item);
-    }
-
-    updateChatListDiscoverSlot();
+    return !!list.querySelector('.chat-item');
 }
 
 function updateHeaderForChatHome() {
@@ -863,72 +624,35 @@ async function showChatListHome() {
     switchView('chat-panel');
     closeSidebar();
     syncTopbarMenuIcon();
-    updateDistrictGroupTab();
     updateMessageInputState();
     saveAppRoute();
-}
-
-function withTimeout(promise, ms, message) {
-    return Promise.race([
-        promise,
-        new Promise((_, reject) => {
-            setTimeout(() => reject(new Error(message)), ms);
-        })
-    ]);
-}
-
-function callLegacyNearbyUsers(maxKm) {
-    const coords = getLocationCoords(currentMyDistrict || DEFAULT_LOCATION);
-    if (!coords) {
-        return supabase.rpc('get_radar_users_without_distance');
-    }
-    return supabase.rpc('get_nearby_users', {
-        my_lat: coords.lat,
-        my_lon: coords.lon,
-        max_dist_km: maxKm
-    });
-}
-
-async function fetchNearbyUsers(maxKm) {
-    return callLegacyNearbyUsers(maxKm);
 }
 
 async function loadProfile() {
     const { data, error } = await supabase
         .from('profiles')
-        .select('username, district, current_district, is_visible, avatar_url, avatar_r2_key, abroad_city')
+        .select('username, avatar_url, avatar_r2_key')
         .eq('id', currentUserId)
         .single();
 
     if (error) {
-        const district = DEFAULT_LOCATION;
         await supabase.from('profiles').upsert({
             id: currentUserId,
             username: 'Kullanıcı',
-            district,
-            current_district: district,
+            district: DEFAULT_LOCATION,
+            current_district: DEFAULT_LOCATION,
             is_visible: false
         });
-        currentMyDistrict = district;
         currentMyUsername = 'Kullanıcı';
-        currentMyIsVisible = false;
         currentMyAvatarUrl = null;
         currentMyAvatarR2Key = null;
-        currentMyAbroadCity = null;
     } else {
-        currentMyDistrict = data.current_district || data.district;
         currentMyUsername = data.username;
-        currentMyIsVisible = data.is_visible === true;
         currentMyAvatarUrl = data.avatar_url || null;
         currentMyAvatarR2Key = data.avatar_r2_key || null;
-        currentMyAbroadCity = data.abroad_city || null;
     }
 
     document.getElementById('usernameInput').value = currentMyUsername;
-    populateDistrictSelects();
-
-    const visibleInput = document.getElementById('isVisibleInput');
-    if (visibleInput) visibleInput.checked = currentMyIsVisible;
 
     refreshAvatarDisplays();
     refreshTopbarMenu();
@@ -945,12 +669,7 @@ async function saveProfile() {
         return;
     }
 
-    const newDistrict = document.getElementById('districtInput').value;
     const newName = sanitizeText(document.getElementById('usernameInput').value, 24);
-    const isVisible = document.getElementById('isVisibleInput')?.checked === true;
-    const abroadCity = isAbroadLocation(newDistrict)
-        ? readAbroadCityInput(document.getElementById('profileAbroadCityInput'))
-        : null;
 
     if (!isValidUsername(newName)) {
         showNotify('Rumuz 2-24 karakter olmalı; harf, rakam, _ . - kullanılabilir.', {
@@ -970,10 +689,7 @@ async function saveProfile() {
 
     const { error } = await supabase.from('profiles').update({
         username: newName,
-        district: newDistrict,
-        current_district: newDistrict,
-        abroad_city: abroadCity,
-        is_visible: isVisible,
+        is_visible: false,
         updated_at: new Date().toISOString()
     }).eq('id', currentUserId);
 
@@ -987,51 +703,15 @@ async function saveProfile() {
         showNotify(hmResult.error, { title: 'Geçersiz PIN', type: 'warning' });
     }
 
-    currentMyDistrict = newDistrict;
-    currentMyAbroadCity = abroadCity;
     currentMyUsername = newName;
-    currentMyIsVisible = isVisible;
     refreshTopbarMenu();
 
-    if (currentGroupDistrict) {
-        updatePresenceTrack({
-            user_id: currentUserId,
-            username: currentMyUsername,
-            district: currentMyDistrict
-        });
-    }
-
-    updateDistrictGroupTab();
     await showChatListHome();
     showNotify('Profil kaydedildi.', { title: 'Başarılı', type: 'success' });
 }
 
-async function getGroupConversationId(district) {
-    if (isLoggedIn()) {
-        const { data, error } = await supabase.rpc('get_or_create_group_conversation', {
-            p_district: district
-        });
-        if (error) throw error;
-        return data;
-    }
-
-    const { data, error } = await supabase
-        .from('conversations')
-        .select('id')
-        .eq('type', 'group')
-        .eq('district', district)
-        .maybeSingle();
-
-    if (error) throw error;
-    return data?.id || null;
-}
-
 function messageClickHandler() {
     return (senderId, username) => openChatFromSender(senderId, username);
-}
-
-function shouldShowMessageSender() {
-    return !currentActiveChat?.startsWith('User-');
 }
 
 function appendMessageToUI({
@@ -1066,8 +746,8 @@ function appendMessageToUI({
         quote,
         reactions,
         onSenderClick: isOutgoing ? null : messageClickHandler(),
-        showSender: shouldShowMessageSender(),
-        showQuoteAuthor: shouldShowMessageSender(),
+        showSender: false,
+        showQuoteAuthor: false,
         viewerUserId: currentUserId,
         viewerUsername: currentMyUsername
     });
@@ -1311,12 +991,9 @@ function handleIncomingBroadcast(payload) {
     maybeShowForegroundNotification(payload, currentActiveChat);
 
     if (shouldCaptureInAppNotification()) {
-        const title = currentActiveChat?.startsWith('Group-')
-            ? formatGroupRoomTitle(currentActiveChat.replace('Group-', ''))
-            : (payload.sender_name || 'Özel Sohbet');
         addInAppNotification({
             chatId: currentActiveChat,
-            title,
+            title: payload.sender_name || 'Özel Sohbet',
             senderId: payload.sender_id || null,
             senderName: payload.sender_name || null,
             messageId: payload.id || payload.message_id || null,
@@ -1325,15 +1002,6 @@ function handleIncomingBroadcast(payload) {
     }
 
     syncDmSidebarPreview(currentActiveChat, payload, false);
-}
-
-function updateOnlineStatus(count, isGroupRoom) {
-    const statusEl = document.getElementById('activeChatStatus');
-    if (!isGroupRoom || !currentActiveChat?.startsWith('Group-')) return;
-
-    statusEl.textContent = count > 0
-        ? `${count} kişi çevrimiçi`
-        : 'Grup odası';
 }
 
 function handleIncomingReactionBroadcast(payload) {
@@ -1355,20 +1023,7 @@ function handleIncomingDeleteBroadcast(payload) {
     updateSelectionBarUi();
 }
 
-function subscribeGroupRealtime(district) {
-    currentGroupDistrict = district;
-    joinGroupRoom(supabase, district, {
-        userId: currentUserId,
-        username: currentMyUsername,
-        onMessage: handleIncomingBroadcast,
-        onReaction: handleIncomingReactionBroadcast,
-        onDelete: handleIncomingDeleteBroadcast,
-        onPresence: (count) => updateOnlineStatus(count, true)
-    });
-}
-
 function subscribeDmRealtime(conversationId) {
-    currentGroupDistrict = null;
     joinDmRoom(supabase, conversationId, {
         userId: currentUserId,
         username: currentMyUsername,
@@ -1423,8 +1078,8 @@ function renderMessageHistoryRows(container, ordered, { profileMap = {}, reactio
             quote: msg.quote || null,
             reactions: reactionsMapToList(reactionsByMessage.get(msg.id)),
             onSenderClick: isOutgoing ? null : messageClickHandler(),
-            showSender: shouldShowMessageSender(),
-            showQuoteAuthor: shouldShowMessageSender(),
+            showSender: false,
+            showQuoteAuthor: false,
             viewerUserId: currentUserId,
             viewerUsername: currentMyUsername
         });
@@ -1628,16 +1283,6 @@ function initMessageSelectionControls() {
     });
 }
 
-async function loadGroupMessageHistory(district, convId) {
-    if (currentActiveChat !== `Group-${district}`) return;
-    if (!convId) {
-        clearMessageContainer();
-        showEmptyChat();
-        return;
-    }
-    await loadMessageHistory(convId);
-}
-
 async function persistMessageAsync({
     body,
     contentType = 'text',
@@ -1647,13 +1292,7 @@ async function persistMessageAsync({
     quote = null
 }) {
     try {
-        let convId = currentConversationId;
-
-        if (!convId && currentActiveChat?.startsWith('Group-')) {
-            const district = currentActiveChat.replace('Group-', '');
-            convId = await getGroupConversationId(district);
-            currentConversationId = convId;
-        }
+        const convId = currentConversationId;
 
         if (!convId || !currentUserId) return;
 
@@ -2066,12 +1705,22 @@ async function deliverPendingForward() {
     showNotify('Mesaj iletildi.', { title: 'İlet', type: 'success' });
 }
 
-async function openChat(chatId, title, status, { avatarUrl = null } = {}) {
+async function openChat(chatId, title, { avatarUrl = null } = {}) {
+    if (!chatId?.startsWith('User-')) {
+        await showChatListHome();
+        return;
+    }
+
+    if (!isLoggedIn()) {
+        promptLogin();
+        return;
+    }
+
     showChatConversationUi();
     messageHistoryLoadId += 1;
     clearMessageContainer();
     currentActiveChat = chatId;
-    const senderId = chatId.startsWith('User-') ? chatId.replace('User-', '') : null;
+    const senderId = chatId.replace('User-', '');
     markNotificationsReadForChat(chatId, senderId);
     clearPendingQuote();
     clearPendingComposerMedia();
@@ -2084,52 +1733,28 @@ async function openChat(chatId, title, status, { avatarUrl = null } = {}) {
     const statusEl = document.getElementById('activeChatStatus');
     const activeChatAvatar = document.getElementById('activeChatAvatar');
 
-    if (chatId.startsWith('User-')) {
-        statusEl.textContent = '';
-        statusEl.style.display = 'none';
-        const userId = chatId.replace('User-', '');
-        const partnerAvatar = await resolveDmPartnerAvatar(userId, avatarUrl);
-        applyAvatarDisplay(activeChatAvatar, partnerAvatar, title);
-    } else {
-        statusEl.style.display = '';
-        statusEl.textContent = status;
-        applyAvatarDisplay(activeChatAvatar, null, title);
-    }
+    statusEl.textContent = '';
+    statusEl.style.display = 'none';
+    const userId = senderId;
+    const partnerAvatar = await resolveDmPartnerAvatar(userId, avatarUrl);
+    applyAvatarDisplay(activeChatAvatar, partnerAvatar, title);
 
     document.querySelectorAll('.chat-item').forEach((item) => item.classList.remove('active'));
 
-    if (chatId.startsWith('Group-')) {
-        const tab = document.getElementById('groupTab');
-        if (tab) tab.classList.add('active');
-        const district = chatId.replace('Group-', '');
+    dmTitles.set(userId, title);
+    const listItem = document.getElementById(`user-${userId}`);
+    if (listItem) listItem.classList.add('active');
+    currentConversationId = dmConversations.get(userId);
 
-        subscribeGroupRealtime(district);
-        const convId = await getGroupConversationId(district);
-        if (currentActiveChat !== chatId) return;
-        currentConversationId = convId;
-        await loadGroupMessageHistory(district, convId);
-    } else if (chatId.startsWith('User-')) {
-        if (!isLoggedIn()) {
-            promptLogin();
-            return;
-        }
-
-        const userId = chatId.replace('User-', '');
-        dmTitles.set(userId, title);
-        const listItem = document.getElementById(`user-${userId}`);
-        if (listItem) listItem.classList.add('active');
-        currentConversationId = dmConversations.get(userId);
-
-        if (!currentConversationId) {
-            clearMessageContainer();
-            showEmptyChat();
-            leaveRealtimeRoom();
-            return;
-        }
-
-        subscribeDmRealtime(currentConversationId);
-        await loadMessageHistory(currentConversationId);
+    if (!currentConversationId) {
+        clearMessageContainer();
+        showEmptyChat();
+        leaveRealtimeRoom();
+        return;
     }
+
+    subscribeDmRealtime(currentConversationId);
+    await loadMessageHistory(currentConversationId);
 
     await deliverPendingForward();
 
@@ -2270,106 +1895,6 @@ async function toggleMessageReaction({ messageId, clientId, emoji }) {
     }).catch((err) => console.error('Tepki yayını başarısız:', err));
 }
 
-const RADAR_RANGE_KM = { 10: 10, 20: 20, 50: 50, all: 5000 };
-const DEFAULT_RADAR_RANGE = 'all';
-
-async function searchRadar(range = DEFAULT_RADAR_RANGE) {
-    if (!isLoggedIn()) {
-        promptLogin();
-        return;
-    }
-
-    if (!(await ensureRadarVisible())) return;
-
-    const searchId = ++radarSearchId;
-
-    document.querySelectorAll('.radar-btn').forEach((b) => b.classList.remove('active'));
-    document.getElementById(`r-${range}`)?.classList.add('active');
-
-    const maxKm = RADAR_RANGE_KM[range] ?? RADAR_RANGE_KM[DEFAULT_RADAR_RANGE];
-
-    const carousel = document.getElementById('radarCarousel');
-    carousel.innerHTML = '';
-
-    const loading = document.createElement('div');
-    loading.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
-    loading.textContent = 'Aranıyor...';
-    carousel.appendChild(loading);
-
-    try {
-        const { data, error } = await withTimeout(
-            fetchNearbyUsers(maxKm),
-            15000,
-            'Arama zaman aşımına uğradı.'
-        );
-
-        if (searchId !== radarSearchId) return;
-
-        carousel.innerHTML = '';
-
-        if (error) {
-            const err = document.createElement('div');
-            err.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
-            err.textContent = 'Radar yüklenemedi. Konum bilginizi profil ayarlarından kontrol edin.';
-            carousel.appendChild(err);
-            return;
-        }
-
-        const users = (data || []).slice().sort((a, b) => {
-            const distA = a.distance_km == null ? Number.POSITIVE_INFINITY : Number(a.distance_km) || 0;
-            const distB = b.distance_km == null ? Number.POSITIVE_INFINITY : Number(b.distance_km) || 0;
-            if (distA !== distB) return distA - distB;
-            return (a.username || '').localeCompare(b.username || '', 'tr');
-        });
-
-        if (users.length === 0) {
-            const empty = document.createElement('div');
-            empty.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
-            empty.textContent = 'Etrafta aktif kullanıcı bulunamadı.';
-            carousel.appendChild(empty);
-            return;
-        }
-
-        users.forEach((user) => {
-            const card = document.createElement('div');
-            card.className = 'user-discover-card';
-            card.addEventListener('click', () => startNewChat(
-                user.user_id,
-                user.username,
-                user.distance_km == null
-                    ? (user.district || ABROAD_LOCATION)
-                    : (user.distance_km === 0 ? 'Aynı konum' : `${user.distance_km} km`),
-                user.avatar_url
-            ));
-
-            const avatar = document.createElement('div');
-            avatar.className = 'card-avatar';
-            applyAvatarDisplay(avatar, user.avatar_url, user.username);
-
-            const name = document.createElement('div');
-            name.className = 'card-name';
-            name.textContent = user.username;
-
-            const dist = document.createElement('div');
-            dist.className = 'card-dist';
-            dist.textContent = formatRadarDistanceLabel(user);
-
-            card.append(avatar, name, dist);
-            carousel.appendChild(card);
-        });
-    } catch (err) {
-        if (searchId !== radarSearchId) return;
-        carousel.innerHTML = '';
-        const fail = document.createElement('div');
-        fail.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
-        fail.textContent = err?.message === 'Arama zaman aşımına uğradı.'
-            ? 'Arama çok uzun sürdü. İnternet bağlantınızı kontrol edip tekrar deneyin.'
-            : 'Radar yüklenemedi. Lütfen tekrar deneyin.';
-        carousel.appendChild(fail);
-        console.error('Radar araması başarısız:', err);
-    }
-}
-
 async function openChatFromSender(senderId, username) {
     if (!isLoggedIn()) {
         promptLogin();
@@ -2391,35 +1916,7 @@ async function openChatFromSender(senderId, username) {
 
     if (!userId) return;
 
-    if (dmConversations.has(userId)) {
-        document.getElementById('radarPanel').classList.remove('open');
-        await openChat(`User-${userId}`, username, 'Özel Sohbet');
-        return;
-    }
-
-    await startNewChat(userId, username, '—');
-}
-
-async function startNewChat(userId, username, dist, avatarUrl = null) {
-    if (!isLoggedIn()) {
-        promptLogin();
-        return;
-    }
-
-    const { data: convId, error } = await supabase.rpc('get_or_create_dm', { p_other: userId });
-    if (error) {
-        showNotify('Sohbet başlatılamadı: ' + error.message, { title: 'Hata', type: 'error' });
-        return;
-    }
-
-    dmConversations.set(userId, convId);
-    dmTitles.set(userId, username);
-    addDmToSidebar(userId, username, dist, '', avatarUrl);
-    setDmListSectionVisible(true);
-
-    currentConversationId = convId;
-    currentActiveChat = `User-${userId}`;
-    await openChat(`User-${userId}`, username, `Özel Sohbet (${dist})`, { avatarUrl });
+    await openDmByUserId(userId, username || null);
 }
 
 function formatChatListTime(dateString) {
@@ -2441,8 +1938,13 @@ function renderDmEmptyState() {
     if (!list) return;
 
     list.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.className = 'chat-list-empty';
+    empty.textContent = isLoggedIn()
+        ? 'Henüz sohbet yok. Size gönderilen kullanıcı linki ile yeni bir sohbet başlatabilirsiniz.'
+        : 'Giriş yaparak sohbetlerinizi görüntüleyin.';
+    list.appendChild(empty);
     setDmListSectionVisible(false);
-    updateDistrictGroupTab();
 }
 
 async function openDefaultStartupChat() {
@@ -2489,7 +1991,6 @@ function updateDmSidebarPreview(userId, preview, createdAt = null) {
     if (list && item.parentElement === list) {
         list.insertBefore(item, list.firstChild);
         setDmListSectionVisible(true);
-        updateDistrictGroupTab();
     }
 }
 
@@ -2509,7 +2010,7 @@ function syncDmSidebarPreview(chatId, payload, isOutgoing) {
     }), payload?.created_at || null);
 }
 
-function addDmToSidebar(userId, username, dist, preview = '', avatarUrl = null, {
+function addDmToSidebar(userId, username, preview = '', avatarUrl = null, {
     lastTime = null,
     append = false
 } = {}) {
@@ -2520,7 +2021,7 @@ function addDmToSidebar(userId, username, dist, preview = '', avatarUrl = null, 
     item.className = 'chat-item';
     item.id = `user-${userId}`;
     item.addEventListener('click', () => {
-        openChat(`User-${userId}`, username, 'Özel Sohbet');
+        openChat(`User-${userId}`, username);
         closeSidebar();
     });
 
@@ -2560,7 +2061,6 @@ function addDmToSidebar(userId, username, dist, preview = '', avatarUrl = null, 
     if (append) list.appendChild(item);
     else list.insertBefore(item, list.firstChild);
     setDmListSectionVisible(true);
-    updateDistrictGroupTab();
 }
 
 async function loadDmHistory() {
@@ -2650,7 +2150,7 @@ async function loadDmHistory() {
     const userIds = [...new Set(chats.map((chat) => chat.userId))];
     const { data: profiles, error: profileError } = await supabase
         .from('profiles')
-        .select('id, username, avatar_url, district')
+        .select('id, username, avatar_url')
         .in('id', userIds);
 
     if (profileError || !profiles?.length) {
@@ -2671,7 +2171,6 @@ async function loadDmHistory() {
         addDmToSidebar(
             chat.userId,
             profile.username,
-            profile.district || '—',
             previewFromMessage({
                 body: chat.lastMsg.body,
                 contentType: chat.lastMsg.content_type || 'text',
@@ -2695,7 +2194,6 @@ async function loadDmHistory() {
         };
     }
 
-    updateDistrictGroupTab();
     return mostRecentDmChat;
 }
 
@@ -2708,8 +2206,6 @@ async function handleLogout() {
     currentMyUsername = 'Misafir';
     currentMyAvatarUrl = null;
     currentMyAvatarR2Key = null;
-    currentMyDistrict = DEFAULT_LOCATION;
-    currentMyIsVisible = false;
     dmConversations.clear();
     dmTitles.clear();
     mostRecentDmChat = null;
@@ -2721,6 +2217,7 @@ async function handleLogout() {
     refreshTopbarMenu();
     updateMessageInputState();
     await showChatListHome();
+    syncAuthGateUi();
     maybeShowWelcomeModal();
 }
 
@@ -2735,11 +2232,8 @@ async function refreshSessionState() {
         await profileReadyPromise;
         document.getElementById('myActiveChatsList').innerHTML = '';
         await loadDmHistory();
-        updateDistrictGroupTab();
 
-        if (currentActiveChat?.startsWith('Group-')) {
-            subscribeGroupRealtime(currentMyDistrict);
-        } else if (currentActiveChat?.startsWith('User-') && currentConversationId) {
+        if (currentActiveChat?.startsWith('User-') && currentConversationId) {
             subscribeDmRealtime(currentConversationId);
         }
 
@@ -2755,13 +2249,15 @@ async function refreshSessionState() {
         updateMessageInputState();
         maybeShowWelcomeModal();
     }
+
+    syncAuthGateUi();
 }
 
 function bootstrapAppUi() {
+    syncAuthGateUi();
     refreshAvatarDisplays();
     refreshTopbarMenu();
     updateMessageInputState();
-    updateDistrictGroupTab();
     syncTopbarMenuIcon();
 }
 
@@ -2776,24 +2272,11 @@ function runInitStep(name, fn) {
 async function initDashboard() {
     bootstrapAppUi();
 
-    try {
-        await loadLocations(supabase);
-    } catch (err) {
-        console.error('[woxifly] loadLocations failed:', err);
-    }
-
     runInitStep('initSeo', initSeo);
     runInitStep('initPasswordVisibilityToggles', () => initPasswordVisibilityToggles());
     runInitStep('initHmCamouflage', initHmCamouflage);
     runInitStep('initLinkViewer', initLinkViewer);
     runInitStep('initViewer', initViewer);
-    runInitStep('initAuthModal', () => initAuthModal(refreshSessionState));
-    runInitStep('initWelcomeModal', () => initWelcomeModal({
-        isLoggedIn,
-        onLogin: promptLogin,
-        onRegister: promptRegister
-    }));
-    runInitStep('initNotifyModal', initNotifyModal);
     runInitStep('initCloudPanel', () => initCloudPanel({
         getSession,
         isLoggedIn,
@@ -2802,6 +2285,20 @@ async function initDashboard() {
         showNotify,
         onAdminStatusChange: () => refreshTopbarMenu()
     }));
+    runInitStep('initAuthModal', () => initAuthModal(refreshSessionState));
+    runInitStep('initWelcomeModal', () => initWelcomeModal({
+        isLoggedIn,
+        onLogin: promptLogin,
+        onRegister: promptRegister
+    }));
+    runInitStep('initNotifyModal', initNotifyModal);
+    if (window.__woxiflyStrippedSensitiveQuery) {
+        delete window.__woxiflyStrippedSensitiveQuery;
+        showNotify(
+            'E-posta ve şifre adres çubuğunda görünmemeli. Bu bağlantıyı açtıysanız şifrenizi değiştirmeniz önerilir.',
+            { title: 'Güvenlik uyarısı', type: 'warning' }
+        );
+    }
     runInitStep('initMediaComposer', initMediaComposer);
     runInitStep('initMessageInteractions', () => initMessageInteractions({
         messageContainer: document.getElementById('messageContainer'),
@@ -2810,7 +2307,7 @@ async function initDashboard() {
         getViewerContext: () => ({
             userId: currentUserId,
             username: currentMyUsername,
-            showQuoteAuthor: shouldShowMessageSender()
+            showQuoteAuthor: false
         }),
         onReactionToggle: toggleMessageReaction,
         onDeleteMessages: softDeleteMessages,
@@ -2823,15 +2320,18 @@ async function initDashboard() {
         event.preventDefault();
         showChatListHome();
     });
-    runInitStep('populateDistrictSelects', populateDistrictSelects);
     runInitStep('initProfileAvatar', initProfileAvatar);
-    runInitStep('initProfileVisibility', initProfileVisibility);
     runInitStep('initPushControls', initPushControls);
     runInitStep('initNotificationCenter', () => initNotificationCenter({
         onNavigate: (route) => {
             if (route) openChatFromNotification(route);
         }
     }));
+    supabase.auth.onAuthStateChange((event, session) => {
+        if (session?.user?.id && (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
+            void refreshCloudAdminStatus().then(() => refreshTopbarMenu());
+        }
+    });
     bootstrapAppUi();
 
     const pushInitPromise = initPushNotifications()
@@ -2850,7 +2350,6 @@ async function initDashboard() {
         await refreshCloudAdminStatus();
         document.getElementById('myActiveChatsList').innerHTML = '';
         await loadDmHistory();
-        updateDistrictGroupTab();
     } else {
         renderDmEmptyState();
         setNotificationUser(null);
@@ -2858,15 +2357,20 @@ async function initDashboard() {
         maybeShowWelcomeModal();
     }
 
+    syncAuthGateUi();
     refreshAvatarDisplays();
     refreshTopbarMenu();
 
-    const route = parseAppRoute();
-    if (route) {
-        await restoreAppRoute(route);
-        saveAppRoute();
-    } else {
-        await openDefaultStartupChat();
+    if (session) {
+        const route = parseAppRoute();
+        if (route) {
+            await restoreAppRoute(route);
+            saveAppRoute();
+        } else {
+            await openDefaultStartupChat();
+        }
+
+        await handleStartupNotificationRoute();
     }
 
     const params = new URLSearchParams(window.location.search);
@@ -2879,8 +2383,11 @@ async function initDashboard() {
         history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
     }
 
-    await handleStartupNotificationRoute();
     window.addEventListener('popstate', async () => {
+        if (!isLoggedIn()) {
+            maybeShowWelcomeModal();
+            return;
+        }
         const nextRoute = parseAppRoute();
         if (nextRoute) {
             await restoreAppRoute(nextRoute);
@@ -2952,12 +2459,6 @@ async function updatePushStatusUI() {
 async function openChatFromNotification(route) {
     if (!route?.chatId && !route?.userId && !route?.usernameSlug) return;
 
-    if (route.chatId?.startsWith('Group-')) {
-        const district = route.chatId.replace('Group-', '');
-        await openChat(route.chatId, formatGroupRoomTitle(district), 'Grup odası');
-        return;
-    }
-
     if (route.usernameSlug) {
         await openDmByUsernameSlug(route.usernameSlug);
         return;
@@ -2993,7 +2494,8 @@ configureTopbar({
     onProfileSettings: openProfileSettings,
     onCloudPanel: openCloudAdminPanel,
     onLogout: handleLogout,
-    onMenuClick: () => window.toggleSidebar?.()
+    onMenuClick: () => window.toggleSidebar?.(),
+    onProfileMenuOpen: () => refreshCloudAdminStatus()
 });
 
 refreshTopbarMenu();

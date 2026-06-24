@@ -9,12 +9,8 @@ let onNavigate = null;
 let storageKey = STORAGE_KEY;
 
 function routeFromChatId(chatId) {
-    if (chatId?.startsWith('Group-')) {
-        const district = chatId.replace('Group-', '');
-        return { chatId, chatType: 'group', district };
-    }
     if (chatId?.startsWith('User-')) {
-        return { chatId, chatType: 'dm', userId: chatId.replace('User-', '') };
+        return { chatId, userId: chatId.replace('User-', '') };
     }
     return { chatId };
 }
@@ -26,17 +22,12 @@ function notificationMergeKey({ chatId, senderId }) {
     return null;
 }
 
-function formatNotificationSubtitle({ count = 1, roomLabel = null }) {
-    const msgPart = count > 1 ? `${count} yeni mesaj` : 'Yeni mesaj';
-    if (roomLabel) return `${roomLabel} · ${msgPart}`;
-    return msgPart;
+function formatNotificationSubtitle({ count = 1 }) {
+    return count > 1 ? `${count} yeni mesaj` : 'Yeni mesaj';
 }
 
 function applyNotificationSubtitle(item) {
-    item.subtitle = formatNotificationSubtitle({
-        count: item.count,
-        roomLabel: item.roomLabel
-    });
+    item.subtitle = formatNotificationSubtitle({ count: item.count });
 }
 
 function consolidateItemsByMergeKey() {
@@ -73,12 +64,8 @@ function consolidateItemsByMergeKey() {
             existing.route = item.route || routeFromChatId(item.chatId);
             existing.lastMessageId = item.lastMessageId || existing.lastMessageId;
             existing.lastClientId = item.lastClientId || existing.lastClientId;
-            if (item.roomLabel) existing.roomLabel = item.roomLabel;
         }
-        existing.subtitle = formatNotificationSubtitle({
-            count: existing.count,
-            roomLabel: existing.roomLabel
-        });
+        applyNotificationSubtitle(existing);
     }
 
     items.length = 0;
@@ -134,7 +121,6 @@ function loadItems() {
                 mergeKey: item.mergeKey || notificationMergeKey({ chatId: item.chatId, senderId }),
                 senderId,
                 title: item.title || 'Sohbet',
-                roomLabel: item.roomLabel || null,
                 count: item.count || 1,
                 subtitle: item.subtitle || 'Yeni bildirim',
                 createdAt: item.createdAt || new Date().toISOString(),
@@ -420,8 +406,6 @@ export function addInAppNotification({
     const mergeKey = notificationMergeKey({ chatId, senderId });
     if (!mergeKey) return;
 
-    const isGroup = chatId.startsWith('Group-');
-    const roomLabel = isGroup ? (title || null) : null;
     const displayTitle = senderName || title || 'Kullanıcı';
     const now = new Date().toISOString();
 
@@ -438,7 +422,6 @@ export function addInAppNotification({
         item.senderId = senderId || item.senderId;
         item.lastMessageId = messageId || item.lastMessageId;
         item.lastClientId = clientId || item.lastClientId;
-        if (isGroup) item.roomLabel = roomLabel || item.roomLabel;
         applyNotificationSubtitle(item);
         item.route = routeFromChatId(chatId);
         items.splice(existingIndex, 1);
@@ -450,7 +433,6 @@ export function addInAppNotification({
             mergeKey,
             senderId,
             title: displayTitle,
-            roomLabel,
             count: 1,
             createdAt: now,
             read: false,

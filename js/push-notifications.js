@@ -13,9 +13,6 @@ let profilePushEnabled = false;
 const foregroundNotificationCounts = new Map();
 
 function buildNotificationTag(data) {
-    if (data.chatType === 'group') {
-        return `group-${data.district}-${data.userId || 'room'}`;
-    }
     if (data.userId) return `dm-${data.userId}`;
     return 'woxifly-notification';
 }
@@ -331,18 +328,8 @@ export async function notifyPushRecipients({ conversationId }) {
 }
 
 export function buildNotificationDataFromPayload(payload, activeChatId) {
-    if (activeChatId?.startsWith('Group-')) {
-        return {
-            chatType: 'group',
-            district: activeChatId.replace('Group-', ''),
-            userId: payload?.sender_id || null
-        };
-    }
     if (payload?.sender_id) {
-        return {
-            chatType: 'dm',
-            userId: payload.sender_id
-        };
+        return { userId: payload.sender_id };
     }
     return null;
 }
@@ -377,13 +364,10 @@ export function maybeShowForegroundNotification(payload, activeChatId) {
 }
 
 export function parseNotificationRoute(data) {
-    if (data.chatType === 'group' && data.district) {
-        return { chatId: `Group-${data.district}` };
-    }
-    if (data.chatType === 'dm' && data.username) {
+    if (data.username) {
         return { usernameSlug: usernameToSlug(data.username) };
     }
-    if (data.chatType === 'dm' && data.userId) {
+    if (data.userId) {
         return { userId: data.userId };
     }
     return null;

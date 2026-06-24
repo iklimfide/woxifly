@@ -7,12 +7,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bootstrapEnv } from '../api/_lib/env.js';
+import { getAdminAllowlist, hasAdminConfig } from '../api/_lib/admin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.env.PORT || 3000);
 
 bootstrapEnv();
+
+const adminAllowlist = getAdminAllowlist();
+if (hasAdminConfig()) {
+    console.log(`> Bulut YP: ${adminAllowlist.emails.length} yönetici e-postası yüklendi`);
+} else {
+    console.warn('> Bulut YP: ADMIN_EMAILS veya MASTER_USER tanımlı değil (.env.local)');
+}
 
 const MIME = {
     '.html': 'text/html; charset=utf-8',
@@ -163,7 +171,14 @@ async function dispatchApi(req, res, route, match) {
     }
 
     enhanceResponse(res);
-    await handler(req, res);
+    try {
+        await handler(req, res);
+    } catch (err) {
+        console.error(`[api/${route.module}]`, err);
+        if (!res.headersSent) {
+            res.status(500).json({ error: err?.message || 'API hatası.' });
+        }
+    }
 }
 
 const server = http.createServer(async (req, res) => {

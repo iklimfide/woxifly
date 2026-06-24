@@ -44,7 +44,8 @@ const actions = {
     onProfileSettings: () => {},
     onCloudPanel: () => {},
     onLogout: () => {},
-    onMenuClick: () => {}
+    onMenuClick: () => {},
+    onProfileMenuOpen: null
 };
 
 let mounted = false;
@@ -184,6 +185,11 @@ function toggleProfileMenu() {
 
     if (willOpen) {
         qs('notificationDropdown')?.classList.remove('show');
+        void Promise.resolve(actions.onProfileMenuOpen?.()).then(() => {
+            if (panel.classList.contains('is-open')) {
+                refreshTopbarMenu();
+            }
+        });
     }
 }
 

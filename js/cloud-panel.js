@@ -4,6 +4,7 @@ const CLOUD_PAGE_SIZE = 50;
 
 let deps = null;
 let isCloudAdmin = false;
+let lastAdminError = null;
 let activeConversationId = null;
 let messagesBefore = null;
 let messagesHasMore = false;
@@ -28,19 +29,35 @@ async function cloudFetch(action, params = {}) {
     }
 
     const query = new URLSearchParams({ action, ...params });
-    const res = await fetch(`/api/cloud?${query.toString()}`, {
+    const url = `/api/cloud?${query.toString()}`;
+    const authHeader = { Authorization: `Bearer ${session.access_token}` };
+
+    let res = await fetch(url, {
         method: 'POST',
         cache: 'no-store',
         headers: {
-            Authorization: `Bearer ${session.access_token}`,
+            ...authHeader,
             'Content-Type': 'application/json'
         },
         body: '{}'
     });
 
+    // Eski yerel sunucu / önbellekli dağıtımda POST reddedilirse erişim kontrolünü GET ile dene.
+    if (res.status === 405 && action === 'access') {
+        const probe = await res.clone().json().catch(() => ({}));
+        const hint = String(probe.error || '').toLowerCase();
+        if (hint.includes('get')) {
+            res = await fetch(url, {
+                method: 'GET',
+                cache: 'no-store',
+                headers: authHeader
+            });
+        }
+    }
+
     const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
-        throw new Error('Bulut API yanıtı geçersiz.');
+        throw new Error('Bulut API yanıtı geçersiz. Yerelde npm run local kullanın; npm run static API çalıştırmaz.');
     }
 
     const data = await res.json().catch(() => {
@@ -48,7 +65,8 @@ async function cloudFetch(action, params = {}) {
     });
 
     if (!res.ok) {
-        throw new Error(data.error || 'Bulut isteği başarısız.');
+        const message = [data.error, data.hint].filter(Boolean).join(' ');
+        throw new Error(message || 'Bulut isteği başarısız.');
     }
 
     if (action === 'access') {
@@ -68,18 +86,24 @@ export function isCloudAdminUser() {
 }
 
 export async function refreshCloudAdminStatus() {
-    if (!deps?.isLoggedIn()) {
+    if (!deps) {
+        return isCloudAdmin;
+    }
+
+    if (!deps.isLoggedIn()) {
         isCloudAdmin = false;
-        deps?.onAdminStatusChange?.(false);
+        deps.onAdminStatusChange?.(isCloudAdmin);
         return false;
     }
 
     try {
         await cloudFetch('access');
         isCloudAdmin = true;
+        lastAdminError = null;
     } catch (err) {
         isCloudAdmin = false;
-        console.warn('[bulut] erişim reddedildi:', err.message);
+        lastAdminError = err.message || 'Bulut YP erişimi doğrulanamadı.';
+        console.warn('[bulut] erişim reddedildi:', lastAdminError);
     }
 
     deps?.onAdminStatusChange?.(isCloudAdmin);
@@ -128,7 +152,7 @@ function renderConversationList() {
         btn.className = 'cloud-conv-item' + (item.id === activeConversationId ? ' is-active' : '');
         btn.innerHTML = `
             <span class="cloud-conv-item__title">${escapeHtml(item.title)}</span>
-            <span class="cloud-conv-item__meta">${escapeHtml(item.type === 'group' ? 'Grup' : 'Özel')} · ${escapeHtml(formatDateLabel(item.lastAt))}</span>
+            <span class="cloud-conv-item__meta">${escapeHtml(formatDateLabel(item.lastAt))}</span>
             <span class="cloud-conv-item__preview${item.previewDeleted ? ' cloud-conv-item__preview--deleted' : ''}">${escapeHtml(item.preview || '—')}</span>
         `;
         btn.addEventListener('click', () => {
@@ -146,9 +170,7 @@ function renderMessages({ conversation, messages, prepend = false }) {
     if (!title || !meta || !thread) return;
 
     title.textContent = conversation?.title || 'Sohbet';
-    meta.textContent = conversation?.type === 'group'
-        ? `${conversation.district || 'Grup'} · grup odası`
-        : (conversation?.memberUsernames || []).join(' ↔ ') || 'Özel sohbet';
+    meta.textContent = (conversation?.memberUsernames || []).join(' ↔ ') || 'Özel sohbet';
 
     if (!prepend) thread.innerHTML = '';
 
@@ -197,12 +219,11 @@ function escapeHtml(value) {
 }
 
 async function loadConversations() {
-    const type = el('cloudTypeFilter')?.value || 'all';
     const q = el('cloudSearchInput')?.value?.trim() || '';
     setStatus('Sohbetler yükleniyor…');
 
     try {
-        const data = await cloudFetch('conversations', { type, q, limit: '120' });
+        const data = await cloudFetch('conversations', { q, limit: '120' });
         conversations = data.conversations || [];
         renderConversationList();
         setStatus(conversations.length ? `${conversations.length} sohbet` : 'Sohbet yok');
@@ -272,7 +293,7 @@ export async function openCloudPanel() {
         const allowed = await refreshCloudAdminStatus();
         if (!allowed) {
             deps?.showNotify?.(
-                'Bulut YP için yetkiniz yok. Vercel’de ADMIN_EMAILS veya MASTER_USER (giriş e-postanız) tanımlı olmalı; değişiklikten sonra yeniden deploy edin.',
+                lastAdminError || 'Bulut YP erişimi doğrulanamadı.',
                 { title: 'Erişim reddedildi', type: 'warning' }
             );
             return;
@@ -291,10 +312,6 @@ export async function openCloudPanel() {
 
 export function initCloudPanel(options) {
     deps = options;
-
-    el('cloudTypeFilter')?.addEventListener('change', () => {
-        loadConversations();
-    });
 
     el('cloudSearchInput')?.addEventListener('input', () => {
         clearTimeout(searchTimer);

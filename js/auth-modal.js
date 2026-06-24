@@ -1,6 +1,5 @@
 import { supabase } from './supabase-client.js';
-import { getLocationCoords, isAbroadLocation } from './config.js';
-import { readAbroadCityInput } from './location-abroad.js';
+import { getLocationCoords, DEFAULT_LOCATION } from './config.js';
 import { sanitizeText, isValidUsername, isValidEmail, setButtonLoading, showAuthError } from './utils.js';
 
 let onAuthSuccess = null;
@@ -23,20 +22,8 @@ export function initAuthModal(successCallback) {
         tab.addEventListener('click', () => switchAuthTab(tab.dataset.tab));
     });
 
-    modalElements.overlay.addEventListener('click', (event) => {
-        if (event.target === modalElements.overlay) closeAuthModal();
-    });
-    modalElements.modal.addEventListener('click', (event) => event.stopPropagation());
-    document.getElementById('authModalClose').addEventListener('click', closeAuthModal);
-
     modalElements.loginForm.addEventListener('submit', handleLoginSubmit);
     modalElements.registerForm.addEventListener('submit', handleRegisterSubmit);
-
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && modalElements.modal.classList.contains('open')) {
-            closeAuthModal();
-        }
-    });
 }
 
 export function openAuthModal(tab = 'login') {
@@ -120,13 +107,9 @@ async function handleRegisterSubmit(event) {
     showAuthError(registerMessage, '');
 
     const username = sanitizeText(registerForm.username.value, 24);
-    const district = registerForm.district.value;
-    const abroadCity = isAbroadLocation(district)
-        ? readAbroadCityInput(document.getElementById('registerAbroadCityInput'))
-        : null;
     const email = sanitizeText(registerForm.email.value, 254).toLowerCase();
     const password = registerForm.password.value;
-    const coords = getLocationCoords(district);
+    const coords = getLocationCoords();
 
     if (!isValidUsername(username)) {
         showAuthError(registerMessage, 'Rumuz 2-24 karakter olmalı; harf, rakam, _ . - kullanılabilir.');
@@ -152,8 +135,9 @@ async function handleRegisterSubmit(event) {
             options: {
                 data: {
                     username,
-                    district,
-                    ...(coords ? { lat: coords.lat, lon: coords.lon } : {})
+                    district: DEFAULT_LOCATION,
+                    lat: coords.lat,
+                    lon: coords.lon
                 }
             }
         });
@@ -164,7 +148,7 @@ async function handleRegisterSubmit(event) {
         }
 
         if (data.session) {
-            await completeRegistration(data.user.id, username, district, abroadCity);
+            await completeRegistration(data.user.id, username);
             return;
         }
 
@@ -175,7 +159,7 @@ async function handleRegisterSubmit(event) {
         }
 
         if (loginData.session && loginData.user) {
-            await completeRegistration(loginData.user.id, username, district, abroadCity);
+            await completeRegistration(loginData.user.id, username);
         }
     } catch {
         showAuthError(registerMessage, 'Kayıt sırasında beklenmeyen bir hata oluştu.');
@@ -184,18 +168,17 @@ async function handleRegisterSubmit(event) {
     }
 }
 
-async function completeRegistration(userId, username, district, abroadCity = null) {
-    await ensureProfile(userId, username, district, abroadCity);
+async function completeRegistration(userId, username) {
+    await ensureProfile(userId, username);
     await finishAuth();
 }
 
-async function ensureProfile(userId, username, district, abroadCity = null) {
+async function ensureProfile(userId, username) {
     const { error } = await supabase.from('profiles').upsert({
         id: userId,
         username,
-        district,
-        current_district: district,
-        abroad_city: isAbroadLocation(district) ? abroadCity : null,
+        district: DEFAULT_LOCATION,
+        current_district: DEFAULT_LOCATION,
         is_visible: false,
         updated_at: new Date().toISOString()
     }, { onConflict: 'id' });

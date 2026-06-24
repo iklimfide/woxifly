@@ -36,6 +36,21 @@ function normalizeAdminEmail(value) {
     return email;
 }
 
+function resolveUserEmail(user) {
+    const candidates = [
+        user?.email,
+        user?.user_metadata?.email,
+        user?.raw_user_meta_data?.email
+    ];
+
+    for (const candidate of candidates) {
+        const normalized = normalizeAdminEmail(candidate);
+        if (normalized) return normalized;
+    }
+
+    return null;
+}
+
 export function getAdminAllowlist() {
     const userIds = readEnvList(
         'ADMIN_USER_IDS',
@@ -74,8 +89,17 @@ export function isAdminUser(user) {
 
     if (userIds.includes(user.id)) return true;
 
-    const email = normalizeAdminEmail(user.email);
+    const email = resolveUserEmail(user);
     return email ? emails.includes(email) : false;
+}
+
+export function describeAdminDenial(user) {
+    if (!hasAdminConfig()) {
+        return 'Yönetici listesi tanımlı değil. Yerelde .env.local içine ADMIN_EMAILS ekleyip npm run local ile yeniden başlatın; canlıda Vercel ortam değişkenlerine ekleyip deploy edin.';
+    }
+
+    const email = resolveUserEmail(user) || '(oturumda e-posta yok)';
+    return `Giriş yapılan hesap (${email}) yönetici listesinde değil. ADMIN_EMAILS veya MASTER_USER değerinin bu e-posta ile eşleştiğinden emin olun.`;
 }
 
 export function hasAdminConfig() {

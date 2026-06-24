@@ -28,7 +28,8 @@ function parseEnvFile(content) {
             value = value.slice(1, -1);
         }
 
-        if (key && process.env[key] === undefined) {
+        const existing = process.env[key];
+        if (key && (existing === undefined || (typeof existing === 'string' && !existing.trim()))) {
             process.env[key] = value;
         }
     }

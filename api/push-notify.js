@@ -46,7 +46,7 @@ export default async function handler(req, res) {
 
     const { data: conversation, error: convError } = await service.client
         .from('conversations')
-        .select('id, type, district')
+        .select('id, type')
         .eq('id', conversationId)
         .maybeSingle();
 
@@ -55,53 +55,32 @@ export default async function handler(req, res) {
         return;
     }
 
+    if (conversation.type !== 'dm') {
+        res.status(200).json({ ok: true, sent: 0 });
+        return;
+    }
+
     const senderId = auth.user.id;
 
-    if (conversation.type === 'dm') {
-        const { data: membership } = await service.client
-            .from('conversation_members')
-            .select('user_id')
-            .eq('conversation_id', conversationId)
-            .eq('user_id', senderId)
-            .maybeSingle();
+    const { data: membership } = await service.client
+        .from('conversation_members')
+        .select('user_id')
+        .eq('conversation_id', conversationId)
+        .eq('user_id', senderId)
+        .maybeSingle();
 
-        if (!membership) {
-            res.status(403).json({ error: 'Bu sohbete erişiminiz yok.' });
-            return;
-        }
-    } else if (conversation.type === 'group') {
-        const { data: profile } = await service.client
-            .from('profiles')
-            .select('district')
-            .eq('id', senderId)
-            .maybeSingle();
-
-        if (!profile || profile.district !== conversation.district) {
-            res.status(403).json({ error: 'Bu gruba mesaj gönderemezsiniz.' });
-            return;
-        }
+    if (!membership) {
+        res.status(403).json({ error: 'Bu sohbete erişiminiz yok.' });
+        return;
     }
 
-    let recipientIds = [];
+    const { data: members } = await service.client
+        .from('conversation_members')
+        .select('user_id')
+        .eq('conversation_id', conversationId)
+        .neq('user_id', senderId);
 
-    if (conversation.type === 'dm') {
-        const { data: members } = await service.client
-            .from('conversation_members')
-            .select('user_id')
-            .eq('conversation_id', conversationId)
-            .neq('user_id', senderId);
-
-        recipientIds = (members || []).map((m) => m.user_id);
-    } else if (conversation.type === 'group' && conversation.district) {
-        const { data: profiles } = await service.client
-            .from('profiles')
-            .select('id')
-            .eq('district', conversation.district)
-            .eq('push_enabled', true)
-            .neq('id', senderId);
-
-        recipientIds = (profiles || []).map((p) => p.id);
-    }
+    const recipientIds = (members || []).map((m) => m.user_id);
 
     if (!recipientIds.length) {
         res.status(200).json({ ok: true, sent: 0 });
@@ -119,23 +98,17 @@ export default async function handler(req, res) {
     }
 
     const navigation = {
-        tag: conversation.type === 'dm'
-            ? `dm-${senderId}`
-            : `group-${conversation.district || 'room'}-${senderId}`,
-        chatType: conversation.type === 'dm' ? 'dm' : 'group',
-        district: conversation.district || null,
+        tag: `dm-${senderId}`,
         userId: senderId,
         username: null
     };
 
-    if (conversation.type === 'dm') {
-        const { data: senderProfile } = await service.client
-            .from('profiles')
-            .select('username')
-            .eq('id', senderId)
-            .maybeSingle();
-        navigation.username = senderProfile?.username || null;
-    }
+    const { data: senderProfile } = await service.client
+        .from('profiles')
+        .select('username')
+        .eq('id', senderId)
+        .maybeSingle();
+    navigation.username = senderProfile?.username || null;
 
     let sent = 0;
     const expiredEndpoints = [];

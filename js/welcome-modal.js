@@ -38,11 +38,6 @@ export function initWelcomeModal({ isLoggedIn, onLogin: loginHandler, onRegister
     modal = document.getElementById('welcomeModal');
     if (!overlay || !modal) return;
 
-    document.getElementById('welcomeModalClose')?.addEventListener('click', closeWelcomeModal);
-
-    overlay.addEventListener('click', (event) => {
-        if (event.target === overlay) closeWelcomeModal();
-    });
     modal.addEventListener('click', (event) => event.stopPropagation());
 
     document.getElementById('welcomeLoginBtn')?.addEventListener('click', () => {
@@ -55,9 +50,10 @@ export function initWelcomeModal({ isLoggedIn, onLogin: loginHandler, onRegister
         onRegister?.();
     });
 
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && overlay.classList.contains('open')) {
+    modal.querySelectorAll('.welcome-feature-card-cta').forEach((btn) => {
+        btn.addEventListener('click', () => {
             closeWelcomeModal();
-        }
+            onRegister?.();
+        });
     });
 }
