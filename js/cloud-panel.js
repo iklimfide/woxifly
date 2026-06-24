@@ -29,7 +29,13 @@ async function cloudFetch(action, params = {}) {
 
     const query = new URLSearchParams({ action, ...params });
     const res = await fetch(`/api/cloud?${query.toString()}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
+        method: 'POST',
+        cache: 'no-store',
+        headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json'
+        },
+        body: '{}'
     });
 
     const contentType = res.headers.get('content-type') || '';
@@ -45,8 +51,13 @@ async function cloudFetch(action, params = {}) {
         throw new Error(data.error || 'Bulut isteği başarısız.');
     }
 
-    if (action === 'access' && data.allowed !== true) {
-        throw new Error('Bulut YP erişimi yok.');
+    if (action === 'access') {
+        if (data.allowed !== true) {
+            throw new Error('Bulut YP erişimi yok.');
+        }
+        if (data.userId !== session.user?.id) {
+            throw new Error('Bulut YP erişimi doğrulanamadı.');
+        }
     }
 
     return data;

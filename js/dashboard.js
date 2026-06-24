@@ -66,6 +66,7 @@ import {
     initNotificationCenter,
     addInAppNotification,
     markNotificationsReadForChat,
+    removeNotificationsForDeletedMessages,
     shouldCaptureInAppNotification,
     closeNotificationDropdown,
     setNotificationUser
@@ -1317,7 +1318,9 @@ function handleIncomingBroadcast(payload) {
             chatId: currentActiveChat,
             title,
             senderId: payload.sender_id || null,
-            senderName: payload.sender_name || null
+            senderName: payload.sender_name || null,
+            messageId: payload.id || payload.message_id || null,
+            clientId: payload.client_id || null
         });
     }
 
@@ -1342,6 +1345,10 @@ function handleIncomingReactionBroadcast(payload) {
 function handleIncomingDeleteBroadcast(payload) {
     if (!payload) return;
     removeMessagesFromDom({
+        messageIds: payload.message_ids || [],
+        clientIds: payload.client_ids || []
+    });
+    removeNotificationsForDeletedMessages({
         messageIds: payload.message_ids || [],
         clientIds: payload.client_ids || []
     });
@@ -1559,6 +1566,7 @@ async function softDeleteMessages(targets) {
     }
 
     removeMessagesFromDom({ messageIds, clientIds });
+    removeNotificationsForDeletedMessages({ messageIds, clientIds });
     updateSelectionBarUi();
 
     if (isSelectionMode()) {

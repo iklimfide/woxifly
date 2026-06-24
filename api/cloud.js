@@ -3,6 +3,13 @@ import { verifyAuthToken } from './_lib/auth.js';
 import { isAdminUser } from './_lib/admin.js';
 import { getSupabaseServiceConfig } from './_lib/env.js';
 
+function sendJson(res, status, body) {
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Vary', 'Authorization');
+    res.status(status).json(body);
+}
+
 function getServiceClient() {
     const config = getSupabaseServiceConfig();
     if (config.error) return { error: config.error, status: 500 };
@@ -72,12 +79,12 @@ async function loadMemberUsernamesByConversation(client, conversationIds) {
 async function requireAdmin(req, res) {
     const auth = await verifyAuthToken(req);
     if (auth.error) {
-        res.status(auth.status).json({ error: auth.error });
+        sendJson(res, auth.status, { error: auth.error });
         return null;
     }
 
     if (!isAdminUser(auth.user)) {
-        res.status(403).json({
+        sendJson(res, 403, {
             error: 'Bulut YP erişimi yok.',
             hint: 'Vercel ortam değişkenlerinde ADMIN_EMAILS veya MASTER_USER (giriş e-postanız) tanımlı olmalı.'
         });
@@ -87,8 +94,12 @@ async function requireAdmin(req, res) {
     return auth.user;
 }
 
-async function handleAccess(res) {
-    res.status(200).json({ allowed: true });
+async function handleAccess(res, user) {
+    sendJson(res, 200, {
+        allowed: true,
+        userId: user.id,
+        email: user.email || null
+    });
 }
 
 async function handleConversations(client, query, res) {
@@ -111,14 +122,14 @@ async function handleConversations(client, query, res) {
 
     const { data: conversations, error: convError } = await convQuery;
     if (convError) {
-        res.status(500).json({ error: convError.message });
+        sendJson(res, 500, { error: convError.message });
         return;
     }
 
     const convList = conversations || [];
     const convIds = convList.map((item) => item.id);
     if (!convIds.length) {
-        res.status(200).json({ conversations: [], hasMore: false });
+        sendJson(res, 200, { conversations: [], hasMore: false });
         return;
     }
 
@@ -129,7 +140,7 @@ async function handleConversations(client, query, res) {
         .order('created_at', { ascending: false });
 
     if (msgError) {
-        res.status(500).json({ error: msgError.message });
+        sendJson(res, 500, { error: msgError.message });
         return;
     }
 
@@ -154,7 +165,7 @@ async function handleConversations(client, query, res) {
         try {
             membersByConv = await loadMemberUsernamesByConversation(client, dmIds);
         } catch (err) {
-            res.status(500).json({ error: err.message });
+            sendJson(res, 500, { error: err.message });
             return;
         }
     }
@@ -192,7 +203,7 @@ async function handleConversations(client, query, res) {
         });
     }
 
-    res.status(200).json({
+    sendJson(res, 200, {
         conversations: items,
         hasMore: convList.length === limit
     });
@@ -201,7 +212,7 @@ async function handleConversations(client, query, res) {
 async function handleMessages(client, query, res) {
     const conversationId = (query.conversationId || '').trim();
     if (!conversationId) {
-        res.status(400).json({ error: 'conversationId gerekli.' });
+        sendJson(res, 400, { error: 'conversationId gerekli.' });
         return;
     }
 
@@ -221,7 +232,7 @@ async function handleMessages(client, query, res) {
 
     const { data: messages, error } = await msgQuery;
     if (error) {
-        res.status(500).json({ error: error.message });
+        sendJson(res, 500, { error: error.message });
         return;
     }
 
@@ -236,7 +247,7 @@ async function handleMessages(client, query, res) {
             .in('id', senderIds);
 
         if (profileError) {
-            res.status(500).json({ error: profileError.message });
+            sendJson(res, 500, { error: profileError.message });
             return;
         }
 
@@ -252,7 +263,7 @@ async function handleMessages(client, query, res) {
         .maybeSingle();
 
     if (convError || !conversation) {
-        res.status(404).json({ error: 'Sohbet bulunamadı.' });
+        sendJson(res, 404, { error: 'Sohbet bulunamadı.' });
         return;
     }
 
@@ -262,12 +273,12 @@ async function handleMessages(client, query, res) {
             const membersByConv = await loadMemberUsernamesByConversation(client, [conversationId]);
             memberUsernames = membersByConv.get(conversationId) || [];
         } catch (err) {
-            res.status(500).json({ error: err.message });
+            sendJson(res, 500, { error: err.message });
             return;
         }
     }
 
-    res.status(200).json({
+    sendJson(res, 200, {
         conversation: {
             id: conversation.id,
             type: conversation.type,
@@ -295,12 +306,13 @@ async function handleMessages(client, query, res) {
 
 export default async function handler(req, res) {
     if (req.method === 'OPTIONS') {
+        res.setHeader('Cache-Control', 'private, no-store, max-age=0');
         res.status(204).end();
         return;
     }
 
-    if (req.method !== 'GET') {
-        res.status(405).json({ error: 'Yalnızca GET desteklenir.' });
+    if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'Yalnızca POST desteklenir.' });
         return;
     }
 
@@ -309,7 +321,7 @@ export default async function handler(req, res) {
     if (action === 'access') {
         const user = await requireAdmin(req, res);
         if (!user) return;
-        await handleAccess(res);
+        await handleAccess(res, user);
         return;
     }
 
@@ -318,7 +330,7 @@ export default async function handler(req, res) {
 
     const service = getServiceClient();
     if (service.error) {
-        res.status(service.status).json({ error: service.error });
+        sendJson(res, service.status, { error: service.error });
         return;
     }
 
@@ -332,5 +344,5 @@ export default async function handler(req, res) {
         return;
     }
 
-    res.status(400).json({ error: 'Geçersiz action.' });
+    sendJson(res, 400, { error: 'Geçersiz action.' });
 }

@@ -32,6 +32,13 @@ function formatNotificationSubtitle({ count = 1, roomLabel = null }) {
     return msgPart;
 }
 
+function applyNotificationSubtitle(item) {
+    item.subtitle = formatNotificationSubtitle({
+        count: item.count,
+        roomLabel: item.roomLabel
+    });
+}
+
 function consolidateItemsByMergeKey() {
     const before = items.length;
     const merged = new Map();
@@ -64,6 +71,8 @@ function consolidateItemsByMergeKey() {
             existing.title = item.title || existing.title;
             existing.senderId = item.senderId || existing.senderId;
             existing.route = item.route || routeFromChatId(item.chatId);
+            existing.lastMessageId = item.lastMessageId || existing.lastMessageId;
+            existing.lastClientId = item.lastClientId || existing.lastClientId;
             if (item.roomLabel) existing.roomLabel = item.roomLabel;
         }
         existing.subtitle = formatNotificationSubtitle({
@@ -129,10 +138,14 @@ function loadItems() {
                 count: item.count || 1,
                 subtitle: item.subtitle || 'Yeni bildirim',
                 createdAt: item.createdAt || new Date().toISOString(),
+                readAt: item.readAt || null,
                 read: !!item.read,
+                lastMessageId: item.lastMessageId || null,
+                lastClientId: item.lastClientId || null,
                 route: item.route || routeFromChatId(item.chatId)
             });
         });
+        items.forEach((item) => applyNotificationSubtitle(item));
     } catch {
         items.length = 0;
     }
@@ -143,7 +156,8 @@ function purgeExpiredItems() {
     let changed = false;
 
     for (let i = items.length - 1; i >= 0; i -= 1) {
-        const createdAt = new Date(items[i].createdAt).getTime();
+        const item = items[i];
+        const createdAt = new Date(item.createdAt).getTime();
         if (!Number.isFinite(createdAt) || createdAt < cutoff) {
             items.splice(i, 1);
             changed = true;
@@ -153,6 +167,25 @@ function purgeExpiredItems() {
     if (changed) {
         persistItems();
     }
+}
+
+function removeMatchingNotifications({ messageIds = [], clientIds = [] } = {}) {
+    const idSet = new Set((messageIds || []).filter(Boolean));
+    const clientSet = new Set((clientIds || []).filter(Boolean));
+    if (!idSet.size && !clientSet.size) return false;
+
+    let changed = false;
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+        const item = items[i];
+        const matchesMessage = item.lastMessageId && idSet.has(item.lastMessageId);
+        const matchesClient = item.lastClientId && clientSet.has(item.lastClientId);
+        if (matchesMessage || matchesClient) {
+            items.splice(i, 1);
+            changed = true;
+        }
+    }
+
+    return changed;
 }
 
 function unreadCount() {
@@ -221,7 +254,7 @@ function renderMenu() {
     items.forEach((item) => {
         const row = document.createElement('button');
         row.type = 'button';
-        row.className = `notification-item${item.read ? '' : ' notification-item--unread'}`;
+        row.className = `notification-item${item.read ? ' notification-item--read' : ' notification-item--unread'}`;
         row.dataset.id = item.id;
 
         const title = document.createElement('div');
@@ -253,9 +286,11 @@ function closeNotificationMenu() {
 
 function markAllRead() {
     let changed = false;
+    const now = new Date().toISOString();
     items.forEach((item) => {
         if (!item.read) {
             item.read = true;
+            item.readAt = now;
             changed = true;
         }
     });
@@ -270,6 +305,7 @@ function markAllRead() {
 function handleItemClick(item) {
     if (!item.read) {
         item.read = true;
+        item.readAt = new Date().toISOString();
         persistItems();
         updateBadge();
     }
@@ -344,12 +380,14 @@ export function markNotificationsReadForChat(chatId, senderId = null) {
     if (!chatId && !senderId) return;
 
     let changed = false;
+    const now = new Date().toISOString();
     items.forEach((item) => {
         if (item.read) return;
         const matchesChat = chatId && item.chatId === chatId;
         const matchesSender = senderId && item.senderId === senderId;
         if (matchesChat || matchesSender) {
             item.read = true;
+            item.readAt = now;
             changed = true;
         }
     });
@@ -361,7 +399,22 @@ export function markNotificationsReadForChat(chatId, senderId = null) {
     renderMenu();
 }
 
-export function addInAppNotification({ chatId, title, senderId = null, senderName = null }) {
+export function removeNotificationsForDeletedMessages({ messageIds = [], clientIds = [] } = {}) {
+    if (!removeMatchingNotifications({ messageIds, clientIds })) return;
+
+    persistItems();
+    updateBadge();
+    renderMenu();
+}
+
+export function addInAppNotification({
+    chatId,
+    title,
+    senderId = null,
+    senderName = null,
+    messageId = null,
+    clientId = null
+}) {
     if (!chatId) return;
 
     const mergeKey = notificationMergeKey({ chatId, senderId });
@@ -379,16 +432,19 @@ export function addInAppNotification({ chatId, title, senderId = null, senderNam
         item.count = (item.count || 1) + 1;
         item.createdAt = now;
         item.read = false;
+        item.readAt = null;
         item.chatId = chatId;
         item.title = displayTitle;
         item.senderId = senderId || item.senderId;
+        item.lastMessageId = messageId || item.lastMessageId;
+        item.lastClientId = clientId || item.lastClientId;
         if (isGroup) item.roomLabel = roomLabel || item.roomLabel;
-        item.subtitle = formatNotificationSubtitle({ count: item.count, roomLabel: item.roomLabel });
+        applyNotificationSubtitle(item);
         item.route = routeFromChatId(chatId);
         items.splice(existingIndex, 1);
         items.unshift(item);
     } else {
-        items.unshift({
+        const item = {
             id: crypto.randomUUID(),
             chatId,
             mergeKey,
@@ -396,11 +452,15 @@ export function addInAppNotification({ chatId, title, senderId = null, senderNam
             title: displayTitle,
             roomLabel,
             count: 1,
-            subtitle: formatNotificationSubtitle({ count: 1, roomLabel }),
             createdAt: now,
             read: false,
+            readAt: null,
+            lastMessageId: messageId || null,
+            lastClientId: clientId || null,
             route: routeFromChatId(chatId)
-        });
+        };
+        applyNotificationSubtitle(item);
+        items.unshift(item);
     }
 
     if (items.length > MAX_ITEMS) {

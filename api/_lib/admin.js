@@ -30,6 +30,12 @@ function readEnvList(...names) {
     return values;
 }
 
+function normalizeAdminEmail(value) {
+    const email = String(value || '').trim().toLowerCase();
+    if (!email || !email.includes('@') || email.length < 5) return null;
+    return email;
+}
+
 export function getAdminAllowlist() {
     const userIds = readEnvList(
         'ADMIN_USER_IDS',
@@ -43,12 +49,15 @@ export function getAdminAllowlist() {
         'MASTER_USER_EMAIL',
         'MASTER_EMAIL',
         'MASTER_EMAILS'
-    ).map((item) => item.toLowerCase());
+    )
+        .map(normalizeAdminEmail)
+        .filter(Boolean);
 
     const masterUser = env('MASTER_USER');
     if (masterUser) {
         if (masterUser.includes('@')) {
-            mergeUnique(emails, [masterUser.toLowerCase()]);
+            const normalized = normalizeAdminEmail(masterUser);
+            if (normalized) mergeUnique(emails, [normalized]);
         } else {
             mergeUnique(userIds, [masterUser]);
         }
@@ -65,7 +74,7 @@ export function isAdminUser(user) {
 
     if (userIds.includes(user.id)) return true;
 
-    const email = (user.email || '').trim().toLowerCase();
+    const email = normalizeAdminEmail(user.email);
     return email ? emails.includes(email) : false;
 }
 
