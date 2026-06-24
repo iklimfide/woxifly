@@ -1,5 +1,5 @@
 import { openViewer } from './viewer.js';
-import { displayMediaUrl } from './urls.js';
+import { displayMediaUrl, getMediaDisplayUrls } from './urls.js';
 import { createVoiceMessagePlayer } from '../voice-message-ui.js';
 
 function el(tag, className, text) {
@@ -50,30 +50,26 @@ function buildThumb(kind, src) {
 
     const img = el('img', 'media-thumb');
     img.alt = '';
-    img.loading = 'lazy';
+    img.loading = 'eager';
     img.decoding = 'async';
     img.src = resolved;
     return img;
 }
 
-async function markThumbLoadError(card, thumb, resolved) {
+function markThumbLoadError(card, thumb, resolved, mediaR2Key = null) {
     if (card.classList.contains('media-card--error')) return;
 
-    try {
-        const response = await fetch(resolved, { method: 'HEAD', credentials: 'same-origin' });
-        if (response.ok) return;
-    } catch {
-        // HEAD desteklenmiyorsa GET ile doğrula
-        try {
-            const response = await fetch(resolved, {
-                method: 'GET',
-                credentials: 'same-origin',
-                headers: { Range: 'bytes=0-0' }
-            });
-            if (response.ok || response.status === 206) return;
-        } catch {
-            // aşağıda hata göster
-        }
+    const retry = Number(card.dataset.mediaRetry || 0);
+    const host = card.closest('.message-media');
+    const r2Key = mediaR2Key || host?.dataset.mediaR2Key || null;
+    const source = host?.dataset.mediaSrc || resolved;
+    const candidates = getMediaDisplayUrls(source, r2Key);
+    const next = retry + 1;
+
+    if (thumb?.tagName === 'IMG' && next < candidates.length) {
+        card.dataset.mediaRetry = String(next);
+        thumb.src = candidates[next];
+        return;
     }
 
     thumb?.remove();
@@ -103,11 +99,13 @@ function bindCardActivation(card, onActivate) {
     });
 }
 
-export function renderMediaBlock(host, { kind, src, state = 'ready' }) {
+export function renderMediaBlock(host, { kind, src, state = 'ready', mediaR2Key = null }) {
     host.replaceChildren();
     host.dataset.mediaKind = kind;
     host.dataset.mediaState = state;
     if (src) host.dataset.mediaSrc = src;
+    if (mediaR2Key) host.dataset.mediaR2Key = mediaR2Key;
+    else delete host.dataset.mediaR2Key;
 
     if (kind === 'audio') {
         const previousSrc = host.dataset.mediaSrc;
@@ -157,7 +155,7 @@ export function renderMediaBlock(host, { kind, src, state = 'ready' }) {
 
     if (thumb.tagName === 'IMG') {
         thumb.addEventListener('error', () => {
-            markThumbLoadError(card, thumb, resolved);
+            markThumbLoadError(card, thumb, resolved, mediaR2Key);
         });
     }
 
@@ -166,7 +164,7 @@ export function renderMediaBlock(host, { kind, src, state = 'ready' }) {
     if (kind === 'video') {
         card.classList.add('media-card--video');
         thumb.addEventListener('error', () => {
-            markThumbLoadError(card, thumb, resolved);
+            markThumbLoadError(card, thumb, resolved, mediaR2Key);
         });
     }
 
@@ -186,7 +184,12 @@ export function updateMediaBlock(clientId, options) {
     if (!host) return;
 
     const kind = options.kind || host.dataset.mediaKind || 'image';
-    renderMediaBlock(host, options);
+    renderMediaBlock(host, {
+        kind,
+        src: options.src,
+        state: options.state,
+        mediaR2Key: options.mediaR2Key || host.dataset.mediaR2Key || null
+    });
 
     const status = message.querySelector('.message-status');
     if (!status) return;
@@ -206,10 +209,10 @@ export function updateMediaBlock(clientId, options) {
     }
 }
 
-export function createMediaHost({ kind, src, state, clientId, isOutgoing }) {
+export function createMediaHost({ kind, src, state, clientId, isOutgoing, mediaR2Key = null }) {
     const host = el('div', 'message-media');
     if (clientId) host.dataset.clientId = clientId;
-    renderMediaBlock(host, { kind, src, state });
+    renderMediaBlock(host, { kind, src, state, mediaR2Key });
 
     if (isOutgoing && clientId) {
         const status = el('span', 'message-status');

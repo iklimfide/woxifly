@@ -46,37 +46,69 @@ function extractMediaPath(input) {
 }
 
 function legacyR2KeyFallback(key) {
-    const match = String(key).match(/^videos\/([^/]+)\/([^/]+)$/);
-    if (!match) return null;
-    return `uploads/${match[1]}/${match[2]}`;
-}
-
-function normalizeR2Key(key) {
     const bare = String(key).replace(/^\/+/, '').split('?')[0].split('#')[0];
-    return legacyR2KeyFallback(bare) || bare;
-}
+    const videoMatch = bare.match(/^videos\/([^/]+)\/([^/]+)$/);
+    if (videoMatch) return `uploads/${videoMatch[1]}/${videoMatch[2]}`;
 
-/** Geçmiş mesajlar: media_url + r2_key yedek çözümleme. */
-export function resolveMessageMediaUrl(mediaUrl, r2Key = null) {
-    const fromUrl = toMediaUrl(mediaUrl);
-    if (fromUrl) {
-        const path = extractMediaPath(fromUrl);
-        if (path) {
-            const normalized = normalizeR2Key(path);
-            if (normalized !== path) return `${MEDIA_BASE}/${normalized}`;
-        }
-        return fromUrl;
-    }
-
-    if (isR2MediaKey(r2Key)) {
-        const key = normalizeR2Key(r2Key);
-        return `${MEDIA_BASE}/${key}`;
-    }
+    const imageMatch = bare.match(/^images\/([^/]+)\/([^/]+)$/);
+    if (imageMatch) return `uploads/${imageMatch[1]}/${imageMatch[2]}`;
 
     return null;
 }
 
-/** Broadcast için R2 public URL; yoksa proxy yolu. */
+function normalizeR2Key(key) {
+    const bare = String(key).replace(/^\/+/, '').split('?')[0].split('#')[0];
+    return bare;
+}
+
+function mediaUrlCandidates(mediaUrl, r2Key = null) {
+    const candidates = [];
+    const seen = new Set();
+    const addPath = (path) => {
+        if (!path || seen.has(path)) return;
+        seen.add(path);
+        candidates.push(`${MEDIA_BASE}/${path}`);
+    };
+
+    const paths = [];
+    const fromUrl = extractMediaPath(mediaUrl);
+    if (fromUrl) paths.push(fromUrl);
+    if (isR2MediaKey(r2Key)) {
+        paths.push(String(r2Key).replace(/^\/+/, '').split('?')[0].split('#')[0]);
+    }
+
+    for (const path of paths) {
+        addPath(path);
+        const legacy = legacyR2KeyFallback(path);
+        if (legacy) addPath(legacy);
+    }
+
+    return candidates;
+}
+
+/** Geçmiş mesajlar: media_url + r2_key yedek çözümleme. */
+export function resolveMessageMediaUrl(mediaUrl, r2Key = null) {
+    const candidates = mediaUrlCandidates(mediaUrl, r2Key);
+    return candidates[0] || null;
+}
+
+/** img/video/audio src listesi — birincil + yedek yollar. */
+export function getMediaDisplayUrls(mediaUrl, r2Key = null) {
+    const seen = new Set();
+    const out = [];
+    for (const path of mediaUrlCandidates(mediaUrl, r2Key)) {
+        const url = displayMediaUrl(path) || path;
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        out.push(url);
+    }
+    return out;
+}
+
+export function resolveAvatarMediaUrl(avatarUrl, avatarR2Key = null) {
+    return resolveMessageMediaUrl(avatarUrl, avatarR2Key);
+}
+
 export function toBroadcastMediaUrl(input) {
     const mediaPath = extractMediaPath(input);
     if (!mediaPath) return null;

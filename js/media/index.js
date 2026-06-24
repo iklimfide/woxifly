@@ -5,6 +5,8 @@ export {
     toBroadcastMediaUrl,
     displayMediaUrl,
     resolveMessageMediaUrl,
+    resolveAvatarMediaUrl,
+    getMediaDisplayUrls,
     isValidMediaUrl,
     kindFromFile,
     isMediaKind

@@ -26,7 +26,7 @@ function previewBody(message) {
 
 function conversationTitle(conversation, memberNames = []) {
     if (conversation.type === 'group') {
-        return `${conversation.district || 'Grup'} Genel Odası`;
+        return `${conversation.district || 'Grup'} Odası`;
     }
     if (memberNames.length) return memberNames.join(' ↔ ');
     return 'Özel Sohbet';
@@ -210,7 +210,7 @@ async function handleMessages(client, query, res) {
 
     let msgQuery = client
         .from('messages')
-        .select('id, body, created_at, sender_id, sender_username, receiver_id, receiver_username, content_type, media_url, r2_key, deleted_at, client_id')
+        .select('id, body, created_at, sender_id, sender_username, content_type, media_url, r2_key, deleted_at, client_id')
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: false })
         .limit(limit);
@@ -281,8 +281,8 @@ async function handleMessages(client, query, res) {
             createdAt: message.created_at,
             senderId: message.sender_id,
             senderName: message.sender_username || profileMap.get(message.sender_id) || 'Kullanıcı',
-            receiverId: message.receiver_id,
-            receiverName: message.receiver_username || null,
+            receiverId: null,
+            receiverName: null,
             contentType: message.content_type || 'text',
             mediaUrl: message.media_url,
             r2Key: message.r2_key,

@@ -7,14 +7,62 @@ function parseRangeHeader(value) {
     return value.trim();
 }
 
-async function sendBody(res, body) {
-    if (body && typeof body.pipe === 'function') {
+function pipeStreamToResponse(body, res) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+
+        const finish = (err) => {
+            if (settled) return;
+            settled = true;
+            body.removeListener('error', onError);
+            res.removeListener('error', onError);
+            res.removeListener('finish', onFinish);
+            res.removeListener('close', onClose);
+            if (err) reject(err);
+            else resolve();
+        };
+
+        const onError = (err) => finish(err);
+        const onFinish = () => finish();
+        const onClose = () => {
+            if (!res.writableFinished) {
+                try {
+                    body.destroy?.();
+                } catch {
+                    // ignore
+                }
+            }
+            finish();
+        };
+
+        body.on('error', onError);
+        res.on('error', onError);
+        res.on('finish', onFinish);
+        res.on('close', onClose);
         body.pipe(res);
+    });
+}
+
+async function sendBody(res, body) {
+    if (!body) {
+        res.end();
         return;
     }
 
-    const bytes = await body.transformToByteArray();
-    res.send(Buffer.from(bytes));
+    if (typeof body.transformToByteArray === 'function') {
+        const bytes = await body.transformToByteArray();
+        if (!res.writableEnded) {
+            res.send(Buffer.from(bytes));
+        }
+        return;
+    }
+
+    if (typeof body.pipe === 'function') {
+        await pipeStreamToResponse(body, res);
+        return;
+    }
+
+    res.end();
 }
 
 export default async function handler(req, res) {

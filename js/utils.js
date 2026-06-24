@@ -23,6 +23,61 @@ export function formatTime(dateString) {
     return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 }
 
+export function getCalendarDayKey(dateString) {
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+/** Sohbet ortası tarih etiketi — yalnızca bugün için "Bugün", diğerleri tarih. */
+export function formatMessageDateLabel(dateString) {
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const now = new Date();
+    if (getCalendarDayKey(dateString) === getCalendarDayKey(now.toISOString())) {
+        return 'Bugün';
+    }
+
+    if (date.getFullYear() === now.getFullYear()) {
+        return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
+    }
+
+    return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+export function createMessageDateSeparator(dateString) {
+    const wrap = document.createElement('div');
+    wrap.className = 'message-date-separator';
+    wrap.dataset.dayKey = getCalendarDayKey(dateString);
+    wrap.setAttribute('role', 'separator');
+    wrap.setAttribute('aria-label', formatMessageDateLabel(dateString));
+
+    const label = document.createElement('span');
+    label.className = 'message-date-separator-label';
+    label.textContent = formatMessageDateLabel(dateString);
+    wrap.appendChild(label);
+
+    return wrap;
+}
+
+export function appendMessageToContainer(container, messageEl, createdAt) {
+    const dayKey = getCalendarDayKey(createdAt);
+    const lastMessage = container.querySelector('.message:last-of-type');
+
+    if (dayKey && (!lastMessage || lastMessage.dataset.dayKey !== dayKey)) {
+        container.appendChild(createMessageDateSeparator(createdAt));
+    }
+
+    if (dayKey) messageEl.dataset.dayKey = dayKey;
+    container.appendChild(messageEl);
+    return messageEl;
+}
+
 export function formatQuotePreview(quote) {
     const contentType = quote?.content_type || quote?.contentType || 'text';
     if (contentType === 'image') return '📷 Görsel';
@@ -228,6 +283,17 @@ export function createMessageElement({
         });
         quoteEl.className = `message-quote${quoteIsSelf ? ' message-quote--self' : ''}`;
 
+        const quoteMessageId = quote.message_id || quote.messageId || null;
+        const quoteClientId = quote.client_id || quote.clientId || null;
+        if (quoteMessageId || quoteClientId) {
+            quoteEl.classList.add('message-quote--navigable');
+            if (quoteMessageId) quoteEl.dataset.quoteMessageId = quoteMessageId;
+            if (quoteClientId) quoteEl.dataset.quoteClientId = quoteClientId;
+            quoteEl.title = 'Alıntılanan mesaja git';
+            quoteEl.setAttribute('role', 'button');
+            quoteEl.tabIndex = 0;
+        }
+
         const quoteBody = document.createElement('span');
         quoteBody.className = 'message-quote-body';
         quoteBody.textContent = formatQuotePreview(quote);
@@ -263,12 +329,13 @@ export function createMessageElement({
             src,
             state: mediaState,
             clientId,
-            isOutgoing
+            isOutgoing,
+            mediaR2Key
         });
         mediaStack.appendChild(media.host);
         statusEl = media.status;
 
-        mediaRow.append(mediaStack, createMessageActionsToggle());
+        mediaRow.appendChild(mediaStack);
         bodyWrap.appendChild(mediaRow);
     }
 
@@ -307,22 +374,23 @@ export function createMessageElement({
 
     const contentEl = document.createElement('div');
     contentEl.className = 'message-content';
+    contentEl.appendChild(bodyWrap);
 
-    if (kind && (src || mediaState === 'pending')) {
-        contentEl.appendChild(bodyWrap);
-    } else {
-        const contentRow = document.createElement('div');
-        contentRow.className = 'message-content-row';
-        contentRow.append(bodyWrap, createMessageActionsToggle());
-        contentEl.appendChild(contentRow);
-    }
+    const bubbleEl = document.createElement('div');
+    bubbleEl.className = 'message-bubble';
 
     if (showSender) {
-        wrapper.append(senderEl, contentEl);
+        bubbleEl.append(senderEl, contentEl);
     } else {
-        wrapper.appendChild(contentEl);
+        bubbleEl.appendChild(contentEl);
     }
-    if (statusEl) wrapper.appendChild(statusEl);
+
+    const frameEl = document.createElement('div');
+    frameEl.className = 'message-frame';
+    frameEl.append(bubbleEl, createMessageActionsToggle());
+    if (statusEl) frameEl.appendChild(statusEl);
+
+    wrapper.appendChild(frameEl);
     appendReactionsBar(wrapper, reactions);
 
     return wrapper;

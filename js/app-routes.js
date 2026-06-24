@@ -1,8 +1,4 @@
-import { districtToRoomSlug, DISTRICTS } from './config.js';
-
-const SLUG_TO_DISTRICT = new Map(
-    DISTRICTS.map((district) => [districtToRoomSlug(district), district])
-);
+import { locationToRoomSlug, roomSlugToLocation } from './config.js';
 
 const RESERVED_TOP_LEVEL = new Set(['uye', 'profil', 'profile', 'sohbetler', 'chats', 'bulut']);
 
@@ -17,8 +13,7 @@ export function usernameToSlug(username) {
 }
 
 export function roomSlugToDistrict(slug) {
-    if (!slug) return null;
-    return SLUG_TO_DISTRICT.get(slug.toLowerCase()) || null;
+    return roomSlugToLocation(slug);
 }
 
 export function buildAppPath({ activePanel, currentActiveChat, username } = {}) {
@@ -28,7 +23,7 @@ export function buildAppPath({ activePanel, currentActiveChat, username } = {}) 
 
     if (currentActiveChat.startsWith('Group-')) {
         const district = currentActiveChat.replace('Group-', '');
-        return `/${districtToRoomSlug(district)}`;
+        return `/${locationToRoomSlug(district)}`;
     }
 
     if (currentActiveChat.startsWith('User-') && username) {
@@ -61,7 +56,7 @@ export function parseAppPath(pathname) {
 
     const slug = path.slice(1);
     if (slug && !slug.includes('/') && !RESERVED_TOP_LEVEL.has(slug.toLowerCase())) {
-        const district = roomSlugToDistrict(slug);
+        const district = roomSlugToLocation(slug);
         if (district) {
             return { chatId: `Group-${district}` };
         }

@@ -1,6 +1,6 @@
 /* Woxifly — hafif PWA service worker (push + önbellek) */
 
-const CACHE_NAME = 'woxifly-shell-v6';
+const CACHE_NAME = 'woxifly-shell-v7';
 const SHELL_URLS = [
     '/',
     '/index.html',
@@ -134,13 +134,21 @@ self.addEventListener('notificationclick', (event) => {
     );
 });
 
+const DISTRICT_SLUG_ALIASES = {
+    'İstanbul Anadolu': 'istanbul-anadolu',
+    'İstanbul Avrupa': 'istanbul-avrupa'
+};
+
 function slugDistrict(district) {
+    if (!district) return '';
+    if (DISTRICT_SLUG_ALIASES[district]) return DISTRICT_SLUG_ALIASES[district];
     return district
         .toLowerCase()
         .normalize('NFD')
         .replace(/\p{M}/gu, '')
         .replace(/ı/g, 'i')
-        .replace(/[^a-z0-9]+/g, '');
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
 }
 
 function slugUsername(username) {

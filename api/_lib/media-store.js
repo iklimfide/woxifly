@@ -175,55 +175,63 @@ export async function saveMedia({ userId, fileBuffer, mimeType, kind, fileName =
     }));
 
     return {
-        url: mediaPublicUrl(r2Key),
+        url: mediaProxyUrl(r2Key),
         r2Key,
         kind
     };
 }
 
-export async function readMedia(r2Key, { range } = {}) {
+/** videos/user/file → uploads/user/file; images/user/file → uploads/user/file (eski kayıtlar). */
+function legacyR2KeyFallback(r2Key) {
+    const key = String(r2Key);
+    const videoMatch = key.match(/^videos\/([^/]+)\/([^/]+)$/);
+    if (videoMatch) return `uploads/${videoMatch[1]}/${videoMatch[2]}`;
+
+    const imageMatch = key.match(/^images\/([^/]+)\/([^/]+)$/);
+    if (imageMatch) return `uploads/${imageMatch[1]}/${imageMatch[2]}`;
+
+    return null;
+}
+
+function legacyR2KeyFallbacks(r2Key) {
+    const fallback = legacyR2KeyFallback(r2Key);
+    return fallback && fallback !== r2Key ? [fallback] : [];
+}
+
+async function getObjectFromR2(r2Key, { range } = {}) {
     const { bucket } = getR2Config();
     if (!bucket || !r2Key) throw new Error('Medya bulunamadı.');
 
     const params = { Bucket: bucket, Key: r2Key };
     if (range) params.Range = range;
 
-    try {
-        const result = await getClient().send(new GetObjectCommand(params));
+    const result = await getClient().send(new GetObjectCommand(params));
 
-        return {
-            body: result.Body,
-            contentType: result.ContentType || 'application/octet-stream',
-            cacheControl: result.CacheControl || 'public, max-age=31536000, immutable',
-            contentLength: result.ContentLength,
-            contentRange: result.ContentRange,
-            partial: Boolean(range && result.ContentRange)
-        };
-    } catch (err) {
-        const fallback = legacyR2KeyFallback(r2Key);
-        if (!fallback || fallback === r2Key) throw err;
-
-        const fallbackParams = { Bucket: bucket, Key: fallback };
-        if (range) fallbackParams.Range = range;
-
-        const result = await getClient().send(new GetObjectCommand(fallbackParams));
-
-        return {
-            body: result.Body,
-            contentType: result.ContentType || 'application/octet-stream',
-            cacheControl: result.CacheControl || 'public, max-age=31536000, immutable',
-            contentLength: result.ContentLength,
-            contentRange: result.ContentRange,
-            partial: Boolean(range && result.ContentRange)
-        };
-    }
+    return {
+        body: result.Body,
+        contentType: result.ContentType || 'application/octet-stream',
+        cacheControl: result.CacheControl || 'public, max-age=31536000, immutable',
+        contentLength: result.ContentLength,
+        contentRange: result.ContentRange,
+        partial: Boolean(range && result.ContentRange)
+    };
 }
 
-/** videos/user/file → uploads/user/file (eski yükleme yolu). */
-function legacyR2KeyFallback(r2Key) {
-    const match = String(r2Key).match(/^videos\/([^/]+)\/([^/]+)$/);
-    if (!match) return null;
-    return `uploads/${match[1]}/${match[2]}`;
+export async function readMedia(r2Key, { range } = {}) {
+    if (!r2Key) throw new Error('Medya bulunamadı.');
+
+    try {
+        return await getObjectFromR2(r2Key, { range });
+    } catch (err) {
+        for (const fallbackKey of legacyR2KeyFallbacks(r2Key)) {
+            try {
+                return await getObjectFromR2(fallbackKey, { range });
+            } catch {
+                // sonraki yedek
+            }
+        }
+        throw err;
+    }
 }
 
 export async function deleteMedia(r2Key) {

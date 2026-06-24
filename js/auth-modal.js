@@ -1,5 +1,5 @@
 import { supabase } from './supabase-client.js';
-import { getDistrictCoords } from './config.js';
+import { getLocationCoords } from './config.js';
 import { sanitizeText, isValidUsername, isValidEmail, setButtonLoading, showAuthError } from './utils.js';
 
 let onAuthSuccess = null;
@@ -122,7 +122,7 @@ async function handleRegisterSubmit(event) {
     const district = registerForm.district.value;
     const email = sanitizeText(registerForm.email.value, 254).toLowerCase();
     const password = registerForm.password.value;
-    const coords = getDistrictCoords(district);
+    const coords = getLocationCoords(district);
 
     if (!isValidUsername(username)) {
         showAuthError(registerMessage, 'Rumuz 2-24 karakter olmalı; harf, rakam, _ . - kullanılabilir.');

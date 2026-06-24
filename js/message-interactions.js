@@ -145,6 +145,8 @@ export function clearPendingQuote() {
 export function serializeQuote(quote) {
     if (!quote) return null;
     return {
+        message_id: quote.messageId || quote.message_id || null,
+        client_id: quote.clientId || quote.client_id || null,
         sender_id: quote.senderId || quote.sender_id || null,
         sender_name: quote.sender || quote.sender_name || 'Kullanıcı',
         body: quote.body || '',
@@ -192,6 +194,30 @@ export function findMessageElement({ messageId, clientId }) {
         return document.querySelector(`.message[data-client-id="${CSS.escape(clientId)}"]`);
     }
     return null;
+}
+
+function highlightQuotedMessage(messageEl) {
+    messageEl.classList.remove('message--quote-highlight');
+    void messageEl.offsetWidth;
+    messageEl.classList.add('message--quote-highlight');
+    window.setTimeout(() => {
+        messageEl.classList.remove('message--quote-highlight');
+    }, 1200);
+}
+
+export function scrollToQuotedMessage({ messageId, clientId } = {}) {
+    const target = findMessageElement({ messageId, clientId });
+    if (!target) {
+        onShowNotify?.('Alıntılanan mesaj bu sohbette görünmüyor.', {
+            title: 'Alıntı',
+            type: 'warning'
+        });
+        return false;
+    }
+
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightQuotedMessage(target);
+    return true;
 }
 
 export function updateMessageReactions(messageEl, reactionList) {
@@ -706,6 +732,16 @@ function renderQuoteComposerBar() {
         content.append(preview);
     }
     bar.append(accent, content, closeBtn);
+
+    const quoteMessageId = pendingQuote.messageId || pendingQuote.message_id || null;
+    const quoteClientId = pendingQuote.clientId || pendingQuote.client_id || null;
+    if (quoteMessageId || quoteClientId) {
+        bar.classList.add('quote-composer-bar--navigable');
+        bar.title = 'Alıntılanan mesaja git';
+        if (quoteMessageId) bar.dataset.quoteMessageId = quoteMessageId;
+        if (quoteClientId) bar.dataset.quoteClientId = quoteClientId;
+    }
+
     slot.appendChild(bar);
 }
 
@@ -741,6 +777,18 @@ export function initMessageInteractions({
         if (contextMenuIsOpen) closeActiveActions();
     }, { passive: true });
 
+    const quoteComposerSlot = document.getElementById('quoteComposerSlot');
+    quoteComposerSlot?.addEventListener('click', (event) => {
+        if (event.target.closest('.quote-composer-close')) return;
+        const bar = event.target.closest('.quote-composer-bar--navigable');
+        if (!bar) return;
+        event.preventDefault();
+        scrollToQuotedMessage({
+            messageId: bar.dataset.quoteMessageId || null,
+            clientId: bar.dataset.quoteClientId || null
+        });
+    });
+
     messageContainer.addEventListener('click', (event) => {
         if (event.target.closest('.message-context-menu')) return;
 
@@ -765,6 +813,17 @@ export function initMessageInteractions({
                 const rect = toggleBtn.getBoundingClientRect();
                 showContextMenuForMessage(messageEl, rect.left, rect.bottom + 6);
             }
+            return;
+        }
+
+        const quoteNav = event.target.closest('.message-quote--navigable');
+        if (quoteNav) {
+            event.preventDefault();
+            event.stopPropagation();
+            scrollToQuotedMessage({
+                messageId: quoteNav.dataset.quoteMessageId || null,
+                clientId: quoteNav.dataset.quoteClientId || null
+            });
             return;
         }
 

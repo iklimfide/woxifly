@@ -13,6 +13,7 @@ import {
     toBroadcastMediaUrl,
     displayMediaUrl,
     resolveMessageMediaUrl,
+    resolveAvatarMediaUrl,
     initMediaSendModal,
     openMediaSendModal,
     closeMediaSendModal,
@@ -20,7 +21,14 @@ import {
     setMediaSendUploadState
 } from './media/index.js';
 import { compressImageForAvatar, compressImageForChat } from './media/compress-image.js';
-import { getDistrictCoords, populateDistrictSelect, DEFAULT_DISTRICT, MESSAGE_HISTORY_LIMIT } from './config.js';
+import {
+    getLocationCoords,
+    populateLocationSelect,
+    loadLocations,
+    formatGroupRoomTitle,
+    DEFAULT_LOCATION,
+    MESSAGE_HISTORY_LIMIT
+} from './config.js';
 import {
     joinGroupRoom,
     joinDmRoom,
@@ -30,7 +38,7 @@ import {
     broadcastMessageDelete,
     updatePresenceTrack
 } from './realtime-chat.js';
-import { sanitizeText, isValidUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles } from './utils.js';
+import { sanitizeText, isValidUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles, appendMessageToContainer, createMessageDateSeparator, getCalendarDayKey } from './utils.js';
 import {
     startVoiceRecording,
     stopVoiceRecording,
@@ -60,6 +68,8 @@ import {
     getPushSubscriptionState,
     togglePushNotifications,
     notifyPushRecipients,
+    syncPushEnabledFromProfile,
+    finalizePushInit,
     parseNotificationRoute,
     parseNotifyQueryParam,
     clearNotifyQueryParam,
@@ -92,6 +102,11 @@ import {
     removeMessagesFromDom
 } from './message-interactions.js';
 import {
+    getCachedMessageHistory,
+    setCachedMessageHistory,
+    clearCachedMessageHistory
+} from './message-cache.js';
+import {
     buildAppPath,
     parseAppRoute,
     usernameToSlug,
@@ -116,7 +131,7 @@ let currentUserId = null;
 let pendingForward = null;
 let pendingForwardSourceChat = null;
 let pendingComposerMedia = null;
-let currentMyDistrict = DEFAULT_DISTRICT;
+let currentMyDistrict = DEFAULT_LOCATION;
 let currentMyUsername = 'Misafir';
 let currentMyIsVisible = false;
 let currentMyAvatarUrl = null;
@@ -257,7 +272,7 @@ async function restoreAppRoute(route) {
 
     if (route.chatId?.startsWith('Group-')) {
         const district = route.chatId.replace('Group-', '');
-        await openChat(route.chatId, `${district} Genel Odası`, 'Ortak Grup Odası');
+        await openChat(route.chatId, formatGroupRoomTitle(district), 'Grup odası');
         return;
     }
 
@@ -290,15 +305,20 @@ function promptRegister() {
     openAuthModal('register');
 }
 
-function applyAvatarDisplay(element, url, fallbackLetter) {
+function applyAvatarDisplay(element, url, fallbackLetter, r2Key = null) {
     if (!element) return;
     element.innerHTML = '';
-    const src = displayMediaUrl(url);
+    const src = displayMediaUrl(resolveAvatarMediaUrl(url, r2Key));
     if (src) {
         const img = document.createElement('img');
         img.src = src;
         img.alt = '';
         img.draggable = false;
+        img.loading = 'eager';
+        img.addEventListener('error', () => {
+            element.innerHTML = '';
+            element.textContent = (fallbackLetter || '?').charAt(0).toUpperCase();
+        }, { once: true });
         element.appendChild(img);
     } else {
         element.textContent = (fallbackLetter || '?').charAt(0).toUpperCase();
@@ -322,15 +342,17 @@ async function resolveDmPartnerAvatar(userId, avatarUrl = null) {
 
 function refreshAvatarDisplays() {
     const letter = currentMyUsername?.charAt(0) || 'K';
+    const avatarSrc = displayMediaUrl(resolveAvatarMediaUrl(currentMyAvatarUrl, currentMyAvatarR2Key));
     setTopbarProfileAvatar({
-        imageUrl: displayMediaUrl(currentMyAvatarUrl),
+        imageUrl: avatarSrc,
         letter,
         guest: !isLoggedIn()
     });
     applyAvatarDisplay(
         document.getElementById('profileAvatarPreview'),
         currentMyAvatarUrl,
-        isLoggedIn() ? letter : '?'
+        isLoggedIn() ? letter : '?',
+        currentMyAvatarR2Key
     );
 
     const removeBtn = document.getElementById('profileAvatarRemoveBtn');
@@ -474,15 +496,17 @@ async function uploadProfileAvatar(file) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Yükleme başarısız.');
 
+    const avatarUrl = toPersistMediaUrl(data.url, data.r2Key) || data.url;
+
     const { error } = await supabase.from('profiles').update({
-        avatar_url: data.url,
+        avatar_url: avatarUrl,
         avatar_r2_key: data.r2Key,
         updated_at: new Date().toISOString()
     }).eq('id', currentUserId);
 
     if (error) throw new Error(error.message);
 
-    currentMyAvatarUrl = data.url;
+    currentMyAvatarUrl = avatarUrl;
     currentMyAvatarR2Key = data.r2Key;
     refreshAvatarDisplays();
 }
@@ -512,8 +536,8 @@ async function removeProfileAvatar() {
 }
 
 function populateDistrictSelects() {
-    populateDistrictSelect(document.getElementById('districtInput'), currentMyDistrict);
-    populateDistrictSelect(document.getElementById('register-district'), DEFAULT_DISTRICT);
+    populateLocationSelect(document.getElementById('districtInput'), currentMyDistrict);
+    populateLocationSelect(document.getElementById('register-district'), DEFAULT_LOCATION);
 }
 
 function updateMessageInputState() {
@@ -645,7 +669,7 @@ window.toggleRadarPanel = function () {
     }
 
     panel.classList.toggle('open');
-    if (panel.classList.contains('open')) searchRadar(10);
+    if (panel.classList.contains('open')) searchRadar(DEFAULT_RADAR_RANGE);
 };
 
 window.closeRadarPanel = function () {
@@ -677,7 +701,7 @@ function buildDistrictGroupItem() {
     item.className = `chat-item district-group-item ${isGroupActive}`;
     item.id = 'groupTab';
     item.addEventListener('click', () => {
-        openChat(`Group-${currentMyDistrict}`, `${currentMyDistrict} Genel Odası`, 'Ortak Grup Odası');
+        openChat(`Group-${currentMyDistrict}`, formatGroupRoomTitle(currentMyDistrict), 'Grup odası');
         closeSidebar();
     });
 
@@ -692,12 +716,12 @@ function buildDistrictGroupItem() {
     top.className = 'chat-info-top';
     const name = document.createElement('span');
     name.className = 'chat-name';
-    name.textContent = `${currentMyDistrict} Genel Odası`;
+    name.textContent = formatGroupRoomTitle(currentMyDistrict);
     top.appendChild(name);
 
     const preview = document.createElement('div');
     preview.className = 'chat-preview';
-    preview.textContent = 'Bu ilçedeki ortak genel yazışma alanı.';
+    preview.textContent = 'Bu bölgedeki ortak yazışma alanı.';
 
     info.append(top, preview);
     item.append(avatar, info);
@@ -792,7 +816,7 @@ function withTimeout(promise, ms, message) {
 }
 
 function callLegacyNearbyUsers(maxKm) {
-    const coords = getDistrictCoords(currentMyDistrict || DEFAULT_DISTRICT);
+    const coords = getLocationCoords(currentMyDistrict || DEFAULT_LOCATION);
     return supabase.rpc('get_nearby_users', {
         my_lat: coords.lat,
         my_lon: coords.lon,
@@ -812,7 +836,7 @@ async function loadProfile() {
         .single();
 
     if (error) {
-        const district = DEFAULT_DISTRICT;
+        const district = DEFAULT_LOCATION;
         await supabase.from('profiles').upsert({
             id: currentUserId,
             username: 'Kullanıcı',
@@ -834,7 +858,7 @@ async function loadProfile() {
     }
 
     document.getElementById('usernameInput').value = currentMyUsername;
-    populateDistrictSelect(document.getElementById('districtInput'), currentMyDistrict);
+    populateLocationSelect(document.getElementById('districtInput'), currentMyDistrict);
 
     const visibleInput = document.getElementById('isVisibleInput');
     if (visibleInput) visibleInput.checked = currentMyIsVisible;
@@ -843,6 +867,7 @@ async function loadProfile() {
     refreshTopbarMenu();
     updateMessageInputState();
     updatePushStatusUI();
+    void syncPushEnabledFromProfile();
     await refreshCloudAdminStatus();
     refreshTopbarMenu();
 }
@@ -941,6 +966,7 @@ function appendMessageToUI({
     sender,
     body,
     time,
+    createdAt = null,
     isOutgoing,
     senderId,
     contentType,
@@ -954,7 +980,7 @@ function appendMessageToUI({
     const container = document.getElementById('messageContainer');
     clearMessagePlaceholders(container);
 
-    container.appendChild(createMessageElement({
+    const messageEl = createMessageElement({
         sender,
         body,
         time,
@@ -972,7 +998,9 @@ function appendMessageToUI({
         showQuoteAuthor: shouldShowMessageSender(),
         viewerUserId: currentUserId,
         viewerUsername: currentMyUsername
-    }));
+    });
+
+    appendMessageToContainer(container, messageEl, createdAt || new Date().toISOString());
     container.scrollTop = container.scrollHeight;
     if (isSelectionMode()) {
         refreshSelectionUi(container);
@@ -1138,7 +1166,7 @@ function clearMessagePlaceholders(container = document.getElementById('messageCo
 
 function clearMessageContainer(container = document.getElementById('messageContainer')) {
     if (!container) return;
-    container.querySelectorAll('.message').forEach((el) => el.remove());
+    container.querySelectorAll('.message, .message-date-separator').forEach((el) => el.remove());
     clearMessagePlaceholders(container);
 }
 
@@ -1199,6 +1227,7 @@ function handleIncomingBroadcast(payload) {
         sender: payload.sender_name || 'Kullanıcı',
         body: payload.body || '',
         time: formatTime(payload.created_at),
+        createdAt: payload.created_at,
         isOutgoing: false,
         senderId: payload.sender_id || null,
         contentType,
@@ -1211,7 +1240,7 @@ function handleIncomingBroadcast(payload) {
 
     if (shouldCaptureInAppNotification()) {
         const title = currentActiveChat?.startsWith('Group-')
-            ? `${currentActiveChat.replace('Group-', '')} Genel Odası`
+            ? formatGroupRoomTitle(currentActiveChat.replace('Group-', ''))
             : (payload.sender_name || 'Özel Sohbet');
         addInAppNotification({
             chatId: currentActiveChat,
@@ -1230,7 +1259,7 @@ function updateOnlineStatus(count, isGroupRoom) {
 
     statusEl.textContent = count > 0
         ? `${count} kişi çevrimiçi`
-        : 'Ortak Grup Odası';
+        : 'Grup odası';
 }
 
 function handleIncomingReactionBroadcast(payload) {
@@ -1279,56 +1308,30 @@ function subscribeDmRealtime(conversationId) {
     });
 }
 
-async function loadMessageHistory(conversationId) {
-    const loadId = ++messageHistoryLoadId;
-    const container = document.getElementById('messageContainer');
-    clearMessageContainer(container);
-    showMessageLoading();
+function isActiveMessageHistoryLoad(loadId, conversationId) {
+    return loadId === messageHistoryLoadId && conversationId === currentConversationId;
+}
 
-    const { data: messages, error } = await supabase
-        .from('messages')
-        .select('id, body, created_at, sender_id, sender_username, receiver_id, receiver_username, content_type, media_url, r2_key, client_id, quote')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: false })
-        .limit(MESSAGE_HISTORY_LIMIT);
-
-    if (loadId !== messageHistoryLoadId || conversationId !== currentConversationId) return;
-    if (error) throw error;
-
+function renderMessageHistoryRows(container, ordered, { profileMap = {}, reactionsByMessage = new Map() } = {}) {
     clearMessagePlaceholders(container);
 
-    if (!messages || messages.length === 0) {
+    if (!ordered.length) {
         showEmptyChat();
         return;
     }
 
-    const ordered = [...messages].reverse();
-    const senderIds = [...new Set(ordered.filter((m) => !m.sender_username).map((m) => m.sender_id))];
-    const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, username')
-        .in('id', senderIds);
-
-    if (loadId !== messageHistoryLoadId || conversationId !== currentConversationId) return;
-
-    const profileMap = Object.fromEntries((profiles || []).map((p) => [p.id, p.username]));
-
-    const messageIds = ordered.map((m) => m.id);
-    let reactionsByMessage = new Map();
-    if (messageIds.length) {
-        const { data: reactionRows } = await supabase
-            .from('message_reactions')
-            .select('message_id, user_id, emoji')
-            .in('message_id', messageIds);
-        reactionsByMessage = aggregateReactions(reactionRows || [], currentUserId);
-    }
-
-    if (loadId !== messageHistoryLoadId || conversationId !== currentConversationId) return;
+    let lastDayKey = null;
 
     ordered.forEach((msg) => {
+        const dayKey = getCalendarDayKey(msg.created_at);
+        if (dayKey && dayKey !== lastDayKey) {
+            container.appendChild(createMessageDateSeparator(msg.created_at));
+            lastDayKey = dayKey;
+        }
+
         const senderName = msg.sender_username || profileMap[msg.sender_id] || 'Kullanıcı';
         const isOutgoing = msg.sender_id === currentUserId;
-        container.appendChild(createMessageElement({
+        const messageEl = createMessageElement({
             sender: senderName,
             body: msg.body || '',
             time: formatTime(msg.created_at),
@@ -1346,11 +1349,89 @@ async function loadMessageHistory(conversationId) {
             showQuoteAuthor: shouldShowMessageSender(),
             viewerUserId: currentUserId,
             viewerUsername: currentMyUsername
-        }));
+        });
+        if (dayKey) messageEl.dataset.dayKey = dayKey;
+        container.appendChild(messageEl);
     });
 
     container.scrollTop = container.scrollHeight;
     refreshSelectionUi(container);
+}
+
+async function loadMessageHistory(conversationId) {
+    const loadId = ++messageHistoryLoadId;
+    const container = document.getElementById('messageContainer');
+    clearMessageContainer(container);
+
+    const cached = getCachedMessageHistory(currentUserId, conversationId);
+    let showedCache = false;
+    if (cached?.messages?.length) {
+        showedCache = true;
+        renderMessageHistoryRows(container, cached.messages, {
+            reactionsByMessage: aggregateReactions(cached.reactionRows || [], currentUserId)
+        });
+    } else {
+        showMessageLoading();
+    }
+
+    try {
+        const { data: messages, error } = await supabase
+            .from('messages')
+            .select('id, body, created_at, sender_id, sender_username, content_type, media_url, r2_key, client_id, quote')
+            .eq('conversation_id', conversationId)
+            .order('created_at', { ascending: false })
+            .limit(MESSAGE_HISTORY_LIMIT);
+
+        if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
+        if (error) throw error;
+
+        if (!messages || messages.length === 0) {
+            clearCachedMessageHistory(currentUserId, conversationId);
+            clearMessageContainer(container);
+            showEmptyChat();
+            return;
+        }
+
+        const ordered = [...messages].reverse();
+        const senderIds = [...new Set(ordered.filter((m) => !m.sender_username).map((m) => m.sender_id))];
+        const messageIds = ordered.map((m) => m.id);
+
+        const [profilesResult, reactionsResult] = await Promise.all([
+            senderIds.length
+                ? supabase.from('profiles').select('id, username').in('id', senderIds)
+                : Promise.resolve({ data: [], error: null }),
+            messageIds.length
+                ? supabase
+                    .from('message_reactions')
+                    .select('message_id, user_id, emoji')
+                    .in('message_id', messageIds)
+                : Promise.resolve({ data: [], error: null })
+        ]);
+
+        if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
+        if (profilesResult.error) throw profilesResult.error;
+        if (reactionsResult.error) throw reactionsResult.error;
+
+        const profileMap = Object.fromEntries((profilesResult.data || []).map((p) => [p.id, p.username]));
+        const reactionsByMessage = aggregateReactions(reactionsResult.data || [], currentUserId);
+        const reactionRows = reactionsResult.data || [];
+
+        if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
+
+        container.querySelectorAll('.message, .message-date-separator').forEach((el) => el.remove());
+        renderMessageHistoryRows(container, ordered, { profileMap, reactionsByMessage });
+
+        setCachedMessageHistory(currentUserId, conversationId, {
+            messages: ordered,
+            reactionRows
+        });
+    } catch (err) {
+        if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
+        console.error('[woxifly] loadMessageHistory failed:', err);
+        if (showedCache) return;
+        clearMessageContainer(container);
+        showEmptyChat();
+    }
 }
 
 async function resolveMessageIds(targets) {
@@ -1469,19 +1550,13 @@ function initMessageSelectionControls() {
 }
 
 async function loadGroupMessageHistory(district, convId) {
-    try {
-        if (currentActiveChat !== `Group-${district}`) return;
-        if (!convId) {
-            clearMessageContainer();
-            showEmptyChat();
-            return;
-        }
-        await loadMessageHistory(convId);
-    } catch {
-        if (currentActiveChat !== `Group-${district}`) return;
+    if (currentActiveChat !== `Group-${district}`) return;
+    if (!convId) {
         clearMessageContainer();
         showEmptyChat();
+        return;
     }
+    await loadMessageHistory(convId);
 }
 
 async function persistMessageAsync({
@@ -1508,6 +1583,7 @@ async function persistMessageAsync({
         if (!hasText && !hasMedia) return;
 
         const row = {
+            id: crypto.randomUUID(),
             conversation_id: convId,
             sender_id: currentUserId,
             body: hasText ? sanitizeText(body, 2000) : '',
@@ -1580,6 +1656,7 @@ async function dispatchOutgoingMessage({
             sender: currentMyUsername,
             body: caption,
             time: formatTime(createdAt),
+            createdAt,
             isOutgoing: true,
             contentType: payload.content_type,
             mediaUrl: resolveMessageMediaUrl(payload.media_url, r2Key),
@@ -2114,7 +2191,10 @@ async function toggleMessageReaction({ messageId, clientId, emoji }) {
     }).catch((err) => console.error('Tepki yayını başarısız:', err));
 }
 
-async function searchRadar(range) {
+const RADAR_RANGE_KM = { 10: 10, 20: 20, 50: 50, all: 2500 };
+const DEFAULT_RADAR_RANGE = 50;
+
+async function searchRadar(range = DEFAULT_RADAR_RANGE) {
     if (!isLoggedIn()) {
         promptLogin();
         return;
@@ -2127,9 +2207,9 @@ async function searchRadar(range) {
     const searchId = ++radarSearchId;
 
     document.querySelectorAll('.radar-btn').forEach((b) => b.classList.remove('active'));
-    document.getElementById(`r-${range}`).classList.add('active');
+    document.getElementById(`r-${range}`)?.classList.add('active');
 
-    const maxKm = { 10: 10, 20: 20, 50: 50 }[range] || 10;
+    const maxKm = RADAR_RANGE_KM[range] ?? RADAR_RANGE_KM[DEFAULT_RADAR_RANGE];
 
     const carousel = document.getElementById('radarCarousel');
     carousel.innerHTML = '';
@@ -2153,7 +2233,7 @@ async function searchRadar(range) {
         if (error) {
             const err = document.createElement('div');
             err.style.cssText = 'font-size:0.8rem; color:var(--text-muted); padding:10px;';
-            err.textContent = 'Radar yüklenemedi. İlçe bilginizi profil ayarlarından kontrol edin.';
+            err.textContent = 'Radar yüklenemedi. Konum bilginizi profil ayarlarından kontrol edin.';
             carousel.appendChild(err);
             return;
         }
@@ -2174,7 +2254,7 @@ async function searchRadar(range) {
             card.addEventListener('click', () => startNewChat(
                 user.user_id,
                 user.username,
-                user.distance_km === 0 ? 'Aynı ilçe' : `${user.distance_km} km`,
+                user.distance_km === 0 ? 'Aynı konum' : `${user.distance_km} km`,
                 user.avatar_url
             ));
 
@@ -2189,7 +2269,7 @@ async function searchRadar(range) {
             const dist = document.createElement('div');
             dist.className = 'card-dist';
             dist.textContent = user.distance_km === 0
-                ? `📍 Aynı ilçe · ${user.district || ''}`
+                ? `📍 Aynı konum · ${user.district || ''}`
                 : `📍 ${user.distance_km} km · ${user.district || ''}`;
 
             card.append(avatar, name, dist);
@@ -2546,7 +2626,7 @@ async function handleLogout() {
     currentMyUsername = 'Misafir';
     currentMyAvatarUrl = null;
     currentMyAvatarR2Key = null;
-    currentMyDistrict = DEFAULT_DISTRICT;
+    currentMyDistrict = DEFAULT_LOCATION;
     currentMyIsVisible = false;
     dmConversations.clear();
     dmTitles.clear();
@@ -2614,6 +2694,12 @@ function runInitStep(name, fn) {
 async function initDashboard() {
     bootstrapAppUi();
 
+    try {
+        await loadLocations(supabase);
+    } catch (err) {
+        console.error('[woxifly] loadLocations failed:', err);
+    }
+
     runInitStep('initSeo', initSeo);
     runInitStep('initPasswordVisibilityToggles', () => initPasswordVisibilityToggles());
     runInitStep('initHmCamouflage', initHmCamouflage);
@@ -2660,14 +2746,13 @@ async function initDashboard() {
     runInitStep('initPushControls', initPushControls);
     runInitStep('initNotificationCenter', () => initNotificationCenter({
         onNavigate: (route) => {
-            if (route?.chatId) {
-                openChatFromNotification({ chatId: route.chatId });
-            }
+            if (route) openChatFromNotification(route);
         }
     }));
     bootstrapAppUi();
 
     const pushInitPromise = initPushNotifications()
+        .then(() => finalizePushInit())
         .then(() => updatePushStatusUI())
         .catch(() => updatePushStatusUI());
 
@@ -2743,18 +2828,21 @@ function initPushControls() {
         }
 
         try {
+            const before = await getPushSubscriptionState();
             await togglePushNotifications();
+            const after = await getPushSubscriptionState();
             updatePushStatusUI();
-            const state = await getPushSubscriptionState();
-            const opened = state.subscribed || state.foregroundOnly;
-            showNotify(
-                opened
-                    ? (state.subscribed
+
+            if (after.pushEnabled && !before.pushEnabled) {
+                showNotify(
+                    after.subscribed
                         ? 'Bildirimler açıldı. Masaüstünde arka planda da uyarı alırsınız.'
-                        : 'Bildirimler açıldı. Sekme açıkken masaüstü uyarıları alırsınız.')
-                    : 'Bildirimler kapatıldı.',
-                { title: 'Bildirimler', type: 'info' }
-            );
+                        : 'Bildirimler açıldı. Sekme açıkken masaüstü uyarıları alırsınız.',
+                    { title: 'Bildirimler', type: 'info' }
+                );
+            } else if (!after.pushEnabled && before.pushEnabled) {
+                showNotify('Bildirimler kapatıldı.', { title: 'Bildirimler', type: 'info' });
+            }
         } catch (err) {
             showNotify(err.message || 'Bildirim ayarı değiştirilemedi.', {
                 title: 'Bildirimler',
@@ -2783,7 +2871,7 @@ async function openChatFromNotification(route) {
 
     if (route.chatId?.startsWith('Group-')) {
         const district = route.chatId.replace('Group-', '');
-        await openChat(route.chatId, `${district} Genel Odası`, 'Ortak Grup Odası');
+        await openChat(route.chatId, formatGroupRoomTitle(district), 'Grup odası');
         return;
     }
 

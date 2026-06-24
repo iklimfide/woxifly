@@ -118,7 +118,7 @@ revoke all on function public.set_message_parties() from public, anon, authentic
 drop table if exists public.messages_ordered;
 
 create table public.messages_ordered (
-  id uuid primary key,
+  id uuid primary key default gen_random_uuid(),
   conversation_id uuid not null references public.conversations(id) on delete cascade,
   sender_id uuid not null references auth.users(id) on delete cascade,
   sender_username text not null default 'Kullanıcı',
@@ -146,9 +146,9 @@ create table public.messages_ordered (
     or (
       char_length(media_url) between 10 and 2048
       and (
-        media_url ~ '^/api/media/uploads/[a-zA-Z0-9._%-/]+$'
-        or media_url ~ '^https://[^/]+/uploads/[a-zA-Z0-9._%-/]+$'
-        or media_url ~ '^https://[^/]+/[^/]+/uploads/[a-zA-Z0-9._%-/]+$'
+        media_url ~ '^/api/media/(?:images|videos|audio|avatars|uploads)/[a-zA-Z0-9._%-/]+$'
+        or media_url ~ '^https://[^/]+/(?:images|videos|audio|avatars|uploads)/[a-zA-Z0-9._%-/]+$'
+        or media_url ~ '^https://[^/]+/[^/]+/(?:images|videos|audio|avatars|uploads)/[a-zA-Z0-9._%-/]+$'
       )
     )
   )
@@ -189,6 +189,11 @@ from public.messages m;
 
 alter table public.message_reactions
   drop constraint if exists message_reactions_message_id_fkey;
+
+drop policy if exists "reactions: read dm if member" on public.message_reactions;
+drop policy if exists "reactions: read group if matches district" on public.message_reactions;
+drop policy if exists "reactions: anon read group" on public.message_reactions;
+drop policy if exists "reactions: insert own" on public.message_reactions;
 
 drop trigger if exists messages_set_parties on public.messages;
 drop trigger if exists messages_set_sender_username on public.messages;
@@ -281,3 +286,56 @@ with check (
 
 grant select, insert on public.messages to authenticated;
 grant select on public.messages to anon;
+
+drop policy if exists "reactions: read dm if member" on public.message_reactions;
+create policy "reactions: read dm if member"
+on public.message_reactions for select to authenticated
+using (
+  exists (
+    select 1 from public.messages m
+    where m.id = message_reactions.message_id
+      and m.deleted_at is null
+      and public.is_dm_participant(m.conversation_id)
+  )
+);
+
+drop policy if exists "reactions: read group if matches district" on public.message_reactions;
+create policy "reactions: read group if matches district"
+on public.message_reactions for select to authenticated
+using (
+  exists (
+    select 1 from public.messages m
+    where m.id = message_reactions.message_id
+      and m.deleted_at is null
+      and public.is_group_conversation_for_user(m.conversation_id)
+  )
+);
+
+drop policy if exists "reactions: anon read group" on public.message_reactions;
+create policy "reactions: anon read group"
+on public.message_reactions for select to anon
+using (
+  exists (
+    select 1
+    from public.messages m
+    join public.conversations c on c.id = m.conversation_id
+    where m.id = message_reactions.message_id
+      and m.deleted_at is null
+      and c.type = 'group'
+  )
+);
+
+drop policy if exists "reactions: insert own" on public.message_reactions;
+create policy "reactions: insert own"
+on public.message_reactions for insert to authenticated
+with check (
+  user_id = auth.uid()
+  and exists (
+    select 1 from public.messages m
+    where m.id = message_reactions.message_id
+      and (
+        public.is_dm_participant(m.conversation_id)
+        or public.is_group_conversation_for_user(m.conversation_id)
+      )
+  )
+);

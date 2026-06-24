@@ -6,7 +6,6 @@ import {
     R2_BUCKET_NAME,
     R2_PUBLIC_BASE_URL
 } from '../shared/public-config.js';
-
 export {
     SUPABASE_URL,
     SUPABASE_ANON_KEY,
@@ -16,83 +15,127 @@ export {
     R2_PUBLIC_BASE_URL
 };
 
-export const CITY_NAME = 'İstanbul';
-export const DEFAULT_DISTRICT = 'Kadıköy';
+export const ISTANBUL_ANADOLU = 'İstanbul Anadolu';
+export const ISTANBUL_AVRUPA = 'İstanbul Avrupa';
+export const DEFAULT_LOCATION = ISTANBUL_ANADOLU;
+export const DEFAULT_DISTRICT = DEFAULT_LOCATION;
 
-export const DISTRICT_COORDS = {
-    Adalar: { lat: 40.874, lon: 29.094 },
-    Arnavutköy: { lat: 41.183, lon: 28.739 },
-    Ataşehir: { lat: 40.983, lon: 29.124 },
-    Avcılar: { lat: 40.979, lon: 28.722 },
-    Bağcılar: { lat: 41.039, lon: 28.856 },
-    Bahçelievler: { lat: 41.002, lon: 28.859 },
-    Bakırköy: { lat: 40.978, lon: 28.874 },
-    Başakşehir: { lat: 41.093, lon: 28.802 },
-    Bayrampaşa: { lat: 41.039, lon: 28.914 },
-    Beşiktaş: { lat: 41.042, lon: 29.007 },
-    Beykoz: { lat: 41.143, lon: 29.091 },
-    Beylikdüzü: { lat: 41.002, lon: 28.642 },
-    Beyoğlu: { lat: 41.037, lon: 28.985 },
-    Büyükçekmece: { lat: 41.021, lon: 28.585 },
-    Çatalca: { lat: 41.143, lon: 28.461 },
-    Çekmeköy: { lat: 41.033, lon: 29.178 },
-    Esenler: { lat: 41.043, lon: 28.876 },
-    Esenyurt: { lat: 41.034, lon: 28.680 },
-    Eyüpsultan: { lat: 41.171, lon: 28.934 },
-    Fatih: { lat: 41.019, lon: 28.940 },
-    Gaziosmanpaşa: { lat: 41.064, lon: 28.913 },
-    Güngören: { lat: 41.025, lon: 28.872 },
-    Kadıköy: { lat: 40.991, lon: 29.028 },
-    Kağıthane: { lat: 41.080, lon: 28.975 },
-    Kartal: { lat: 40.906, lon: 29.187 },
-    Küçükçekmece: { lat: 41.000, lon: 28.799 },
-    Maltepe: { lat: 40.934, lon: 29.147 },
-    Pendik: { lat: 40.878, lon: 29.234 },
-    Sancaktepe: { lat: 41.002, lon: 29.230 },
-    Sarıyer: { lat: 41.168, lon: 29.057 },
-    Silivri: { lat: 41.073, lon: 28.247 },
-    Sultanbeyli: { lat: 40.960, lon: 29.264 },
-    Sultangazi: { lat: 41.106, lon: 28.868 },
-    Şile: { lat: 41.176, lon: 29.613 },
-    Şişli: { lat: 41.060, lon: 28.987 },
-    Tuzla: { lat: 40.817, lon: 29.300 },
-    Ümraniye: { lat: 41.025, lon: 29.110 },
-    Üsküdar: { lat: 41.024, lon: 29.016 },
-    Zeytinburnu: { lat: 41.003, lon: 28.907 }
+export const LOCATION_COORDS = {
+    [ISTANBUL_ANADOLU]: { lat: 40.981857142857145, lon: 29.186857142857146 },
+    [ISTANBUL_AVRUPA]: { lat: 41.05616, lon: 28.820040000000002 }
 };
 
-export const DISTRICTS = Object.keys(DISTRICT_COORDS).sort((a, b) => a.localeCompare(b, 'tr'));
-
-export const DISTRICT_ROOM_SLUGS = {
-    Kadıköy: 'kadikoy',
-    Üsküdar: 'uskudar',
-    Beşiktaş: 'besiktas'
+const LOCATION_SLUG_ALIASES = {
+    [ISTANBUL_ANADOLU]: 'istanbul-anadolu',
+    [ISTANBUL_AVRUPA]: 'istanbul-avrupa'
 };
 
-export function districtToRoomSlug(district) {
-    return DISTRICT_ROOM_SLUGS[district] || district
+const LEGACY_DISTRICT_SLUGS = {
+    kadikoy: ISTANBUL_ANADOLU,
+    uskudar: ISTANBUL_ANADOLU,
+    besiktas: ISTANBUL_AVRUPA,
+    istanbulanadolu: ISTANBUL_ANADOLU,
+    istanbulavrupa: ISTANBUL_AVRUPA
+};
+
+let locationNamesCache = null;
+let slugToLocationMap = new Map();
+
+export function formatGroupRoomTitle(location) {
+    return `${location} Odası`;
+}
+
+export function getLocationCoords(location) {
+    return LOCATION_COORDS[location] || LOCATION_COORDS[DEFAULT_LOCATION];
+}
+
+export const getDistrictCoords = getLocationCoords;
+
+export function locationToRoomSlug(location) {
+    if (!location) return '';
+    if (LOCATION_SLUG_ALIASES[location]) return LOCATION_SLUG_ALIASES[location];
+    return location
         .toLowerCase()
         .normalize('NFD')
         .replace(/\p{M}/gu, '')
         .replace(/ı/g, 'i')
-        .replace(/[^a-z0-9]+/g, '');
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
 }
 
-export function getDistrictCoords(district) {
-    return DISTRICT_COORDS[district] || DISTRICT_COORDS[DEFAULT_DISTRICT];
+export const districtToRoomSlug = locationToRoomSlug;
+
+const LOCATION_SORT_PRIORITY = [
+    ISTANBUL_ANADOLU,
+    ISTANBUL_AVRUPA,
+    'Ankara',
+    'İzmir',
+    'Antalya',
+    'Bursa'
+];
+
+function sortLocationNames(names) {
+    return [...names].sort((a, b) => {
+        const ai = LOCATION_SORT_PRIORITY.indexOf(a);
+        const bi = LOCATION_SORT_PRIORITY.indexOf(b);
+        if (ai !== -1 || bi !== -1) {
+            if (ai === -1) return 1;
+            if (bi === -1) return -1;
+            return ai - bi;
+        }
+        return a.localeCompare(b, 'tr');
+    });
 }
 
-export function populateDistrictSelect(selectEl, selectedValue = DEFAULT_DISTRICT) {
+export function registerLocationSlugs(locations) {
+    slugToLocationMap = new Map(
+        (locations || []).map((location) => [locationToRoomSlug(location), location])
+    );
+    for (const [slug, location] of Object.entries(LEGACY_DISTRICT_SLUGS)) {
+        slugToLocationMap.set(slug, location);
+    }
+}
+
+export function roomSlugToLocation(slug) {
+    if (!slug) return null;
+    return slugToLocationMap.get(slug.toLowerCase()) || null;
+}
+
+export const roomSlugToDistrict = roomSlugToLocation;
+
+export async function loadLocations(client) {
+    if (!client) throw new Error('loadLocations requires a Supabase client');
+    const { data, error } = await client
+        .from('district_coordinates')
+        .select('district,latitude,longitude')
+        .order('district');
+    if (error) throw error;
+
+    const names = sortLocationNames((data || []).map((row) => row.district));
+    locationNamesCache = names;
+    for (const row of data || []) {
+        LOCATION_COORDS[row.district] = { lat: row.latitude, lon: row.longitude };
+    }
+    registerLocationSlugs(names);
+    return names;
+}
+
+export function populateLocationSelect(selectEl, selectedValue = DEFAULT_LOCATION) {
     if (!selectEl) return;
-    const current = selectedValue || selectEl.value || DEFAULT_DISTRICT;
+    const names = locationNamesCache?.length
+        ? locationNamesCache
+        : LOCATION_SORT_PRIORITY;
+    const current = selectedValue || selectEl.value || DEFAULT_LOCATION;
     selectEl.innerHTML = '';
-    for (const district of DISTRICTS) {
+    for (const name of names) {
         const opt = document.createElement('option');
-        opt.value = district;
-        opt.textContent = district;
-        if (district === current) opt.selected = true;
+        opt.value = name;
+        opt.textContent = name;
+        if (name === current) opt.selected = true;
         selectEl.appendChild(opt);
     }
 }
+
+export const populateDistrictSelect = populateLocationSelect;
 
 export const MESSAGE_HISTORY_LIMIT = 20;

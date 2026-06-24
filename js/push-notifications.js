@@ -9,6 +9,7 @@ let vapidPublicKey = null;
 let pushSupported = false;
 let webPushReady = false;
 let initReason = null;
+let profilePushEnabled = false;
 const foregroundNotificationCounts = new Map();
 
 function buildNotificationTag(data) {
@@ -52,6 +53,29 @@ async function authHeaders() {
     };
 }
 
+async function getPushEnabledFromProfile() {
+    const session = await getSession();
+    if (!session) return false;
+
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('push_enabled')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+    if (error) {
+        console.warn('push_enabled okunamadı:', error.message);
+        return profilePushEnabled;
+    }
+
+    profilePushEnabled = data?.push_enabled === true;
+    return profilePushEnabled;
+}
+
+export async function syncPushEnabledFromProfile() {
+    return getPushEnabledFromProfile();
+}
+
 async function setPushEnabledInProfile(enabled) {
     const session = await getSession();
     if (!session) throw new Error('Oturum gerekli.');
@@ -62,6 +86,7 @@ async function setPushEnabledInProfile(enabled) {
     }).eq('id', session.user.id);
 
     if (error) throw new Error(error.message);
+    profilePushEnabled = enabled;
 }
 
 export function isPushSupported() {
@@ -173,6 +198,10 @@ export async function initPushNotifications() {
     };
 }
 
+export async function finalizePushInit() {
+    await syncPushEnabledFromProfile().catch(() => {});
+}
+
 export function getNotificationPermission() {
     if (!pushSupported) return 'unsupported';
     return Notification.permission;
@@ -180,16 +209,27 @@ export function getNotificationPermission() {
 
 export async function getPushSubscriptionState() {
     const permission = getNotificationPermission();
+    const pushEnabled = await getPushEnabledFromProfile();
+
     if (!swRegistration?.pushManager) {
-        return { subscribed: false, permission, endpoint: null, foregroundOnly: permission === 'granted' };
+        return {
+            subscribed: false,
+            pushEnabled,
+            permission,
+            endpoint: null,
+            foregroundOnly: pushEnabled && permission === 'granted'
+        };
     }
 
     const sub = await swRegistration.pushManager.getSubscription();
+    const hasSubscription = !!sub;
+
     return {
-        subscribed: !!sub,
+        subscribed: pushEnabled && hasSubscription,
+        pushEnabled,
         permission,
         endpoint: sub?.endpoint || null,
-        foregroundOnly: permission === 'granted' && !sub
+        foregroundOnly: pushEnabled && permission === 'granted' && !hasSubscription
     };
 }
 
@@ -272,8 +312,8 @@ export async function disablePushNotifications() {
 }
 
 export async function togglePushNotifications() {
-    const state = await getPushSubscriptionState();
-    if (state.subscribed || state.foregroundOnly) {
+    const pushEnabled = await getPushEnabledFromProfile();
+    if (pushEnabled) {
         return disablePushNotifications();
     }
     return enablePushNotifications();
@@ -308,7 +348,7 @@ export function buildNotificationDataFromPayload(payload, activeChatId) {
 }
 
 export function maybeShowForegroundNotification(payload, activeChatId) {
-    if (!pushSupported || Notification.permission !== 'granted') return;
+    if (!pushSupported || !profilePushEnabled || Notification.permission !== 'granted') return;
 
     const onChatPanel = document.getElementById('chat-panel')?.classList.contains('active');
     if (!document.hidden && document.hasFocus() && onChatPanel) return;
@@ -365,7 +405,7 @@ export function clearNotifyQueryParam() {
     history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
 }
 
-export function describePushStatus({ permission, subscribed, foregroundOnly }) {
+export function describePushStatus({ permission, subscribed, foregroundOnly, pushEnabled }) {
     if (!pushSupported) {
         if (initReason === 'insecure_context') {
             return {
@@ -383,9 +423,32 @@ export function describePushStatus({ permission, subscribed, foregroundOnly }) {
         };
     }
 
+    if (!pushEnabled) {
+        if (permission === 'denied') {
+            return {
+                text: 'Bildirim izni tarayıcı ayarlarından engellenmiş.',
+                className: 'push-status push-status--off',
+                buttonText: 'Bildirim İzinlerini Yönet',
+                disabled: false
+            };
+        }
+
+        const reopenLabel = permission === 'granted' ? 'Bildirimleri Aç' : 'Bildirim İzinlerini Yönet';
+        const text = permission === 'default'
+            ? 'Bildirimler kapalı. Açmak için tarayıcıdan izin vermeniz gerekir.'
+            : 'Bildirimler kapalı.';
+
+        return {
+            text,
+            className: 'push-status push-status--off',
+            buttonText: reopenLabel,
+            disabled: false
+        };
+    }
+
     if (subscribed) {
         return {
-            text: 'Bildirimler açık (arka plan + masaüstü) — yalnızca maske metin gösterilir.',
+            text: 'Bildirimler açık.',
             className: 'push-status push-status--on',
             buttonText: 'Bildirimleri Kapat',
             disabled: false
@@ -393,9 +456,8 @@ export function describePushStatus({ permission, subscribed, foregroundOnly }) {
     }
 
     if (foregroundOnly) {
-        const hint = webPushReady ? '' : ' Arka plan push sunucusu yapılandırılmamış; sekme açıkken bildirim alırsınız.';
         return {
-            text: `Masaüstü bildirimleri açık (ön plan).${hint}`,
+            text: 'Bildirimler açık. Sekme açıkken uyarı alırsınız.',
             className: 'push-status push-status--on',
             buttonText: 'Bildirimleri Kapat',
             disabled: false
@@ -406,19 +468,15 @@ export function describePushStatus({ permission, subscribed, foregroundOnly }) {
         return {
             text: 'Bildirim izni tarayıcı ayarlarından engellenmiş.',
             className: 'push-status push-status--off',
-            buttonText: 'Bildirim İzinlerini Yönet',
-            disabled: false
+            buttonText: 'Bildirimleri Kapat',
+            disabled: true
         };
     }
 
-    const desktopHint = webPushReady
-        ? ' Chrome, Edge ve Firefox masaüstünde desteklenir.'
-        : ' API çalışıyor; tam arka plan push için VAPID anahtarları gerekli.';
-
     return {
-        text: `Bildirimler kapalı.${desktopHint}`,
-        className: 'push-status push-status--off',
-        buttonText: 'Bildirim İzinlerini Yönet',
+        text: 'Bildirimler açık.',
+        className: 'push-status push-status--on',
+        buttonText: 'Bildirimleri Kapat',
         disabled: false
     };
 }
