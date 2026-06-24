@@ -1,4 +1,7 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import http from 'node:http';
+import https from 'node:https';
 import { randomUUID } from 'crypto';
 import { getR2Config } from './env.js';
 
@@ -69,6 +72,9 @@ export const MEDIA_R2_PREFIXES = ['images', 'videos', 'audio', 'avatars', 'uploa
 
 const PROXY_BASE = '/api/media';
 
+let s3Client = null;
+let s3ClientKey = '';
+
 function getEndpoint() {
     const { endpoint, accountId } = getR2Config();
     if (endpoint) return endpoint.replace(/\/$/, '');
@@ -84,11 +90,25 @@ function getClient() {
         throw new Error('R2 yapılandırması eksik.');
     }
 
-    return new S3Client({
+    const cacheKey = `${endpoint}|${accessKeyId}`;
+    if (s3Client && s3ClientKey === cacheKey) {
+        return s3Client;
+    }
+
+    s3ClientKey = cacheKey;
+    s3Client = new S3Client({
         region: 'auto',
         endpoint,
-        credentials: { accessKeyId, secretAccessKey }
+        credentials: { accessKeyId, secretAccessKey },
+        maxAttempts: 2,
+        requestHandler: new NodeHttpHandler({
+            connectionTimeout: 10_000,
+            requestTimeout: 30_000,
+            httpAgent: new http.Agent({ keepAlive: false, maxSockets: 32 }),
+            httpsAgent: new https.Agent({ keepAlive: false, maxSockets: 32 })
+        })
     });
+    return s3Client;
 }
 
 export function mediaProxyUrl(r2Key) {
@@ -196,6 +216,42 @@ function legacyR2KeyFallback(r2Key) {
 function legacyR2KeyFallbacks(r2Key) {
     const fallback = legacyR2KeyFallback(r2Key);
     return fallback && fallback !== r2Key ? [fallback] : [];
+}
+
+async function headObjectFromR2(r2Key) {
+    const { bucket } = getR2Config();
+    if (!bucket || !r2Key) throw new Error('Medya bulunamadı.');
+
+    const result = await getClient().send(new HeadObjectCommand({
+        Bucket: bucket,
+        Key: r2Key
+    }));
+
+    return {
+        contentType: result.ContentType || 'application/octet-stream',
+        cacheControl: result.CacheControl || 'public, max-age=31536000, immutable',
+        contentLength: result.ContentLength,
+        contentRange: null,
+        partial: false,
+        body: null
+    };
+}
+
+export async function headMedia(r2Key) {
+    if (!r2Key) throw new Error('Medya bulunamadı.');
+
+    try {
+        return await headObjectFromR2(r2Key);
+    } catch (err) {
+        for (const fallbackKey of legacyR2KeyFallbacks(r2Key)) {
+            try {
+                return await headObjectFromR2(fallbackKey);
+            } catch {
+                // sonraki yedek
+            }
+        }
+        throw err;
+    }
 }
 
 async function getObjectFromR2(r2Key, { range } = {}) {

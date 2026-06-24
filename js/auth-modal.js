@@ -1,5 +1,6 @@
 import { supabase } from './supabase-client.js';
-import { getLocationCoords } from './config.js';
+import { getLocationCoords, isAbroadLocation } from './config.js';
+import { readAbroadCityInput } from './location-abroad.js';
 import { sanitizeText, isValidUsername, isValidEmail, setButtonLoading, showAuthError } from './utils.js';
 
 let onAuthSuccess = null;
@@ -120,6 +121,9 @@ async function handleRegisterSubmit(event) {
 
     const username = sanitizeText(registerForm.username.value, 24);
     const district = registerForm.district.value;
+    const abroadCity = isAbroadLocation(district)
+        ? readAbroadCityInput(document.getElementById('registerAbroadCityInput'))
+        : null;
     const email = sanitizeText(registerForm.email.value, 254).toLowerCase();
     const password = registerForm.password.value;
     const coords = getLocationCoords(district);
@@ -149,8 +153,7 @@ async function handleRegisterSubmit(event) {
                 data: {
                     username,
                     district,
-                    lat: coords.lat,
-                    lon: coords.lon
+                    ...(coords ? { lat: coords.lat, lon: coords.lon } : {})
                 }
             }
         });
@@ -161,7 +164,7 @@ async function handleRegisterSubmit(event) {
         }
 
         if (data.session) {
-            await completeRegistration(data.user.id, username, district);
+            await completeRegistration(data.user.id, username, district, abroadCity);
             return;
         }
 
@@ -172,7 +175,7 @@ async function handleRegisterSubmit(event) {
         }
 
         if (loginData.session && loginData.user) {
-            await completeRegistration(loginData.user.id, username, district);
+            await completeRegistration(loginData.user.id, username, district, abroadCity);
         }
     } catch {
         showAuthError(registerMessage, 'Kayıt sırasında beklenmeyen bir hata oluştu.');
@@ -181,17 +184,18 @@ async function handleRegisterSubmit(event) {
     }
 }
 
-async function completeRegistration(userId, username, district) {
-    await ensureProfile(userId, username, district);
+async function completeRegistration(userId, username, district, abroadCity = null) {
+    await ensureProfile(userId, username, district, abroadCity);
     await finishAuth();
 }
 
-async function ensureProfile(userId, username, district) {
+async function ensureProfile(userId, username, district, abroadCity = null) {
     const { error } = await supabase.from('profiles').upsert({
         id: userId,
         username,
         district,
         current_district: district,
+        abroad_city: isAbroadLocation(district) ? abroadCity : null,
         is_visible: false,
         updated_at: new Date().toISOString()
     }, { onConflict: 'id' });

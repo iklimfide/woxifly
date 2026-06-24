@@ -1,4 +1,10 @@
-import { readMedia, r2KeyFromProxyPath } from './_lib/media-store.js';
+import { headMedia, readMedia, r2KeyFromProxyPath } from './_lib/media-store.js';
+
+const IMAGE_PREFIX_RE = /^(?:images|avatars)\//;
+
+const CACHE_MAX = 128;
+const CACHE_TTL_MS = 15 * 60 * 1000;
+const mediaCache = new Map();
 
 function parseRangeHeader(value) {
     if (typeof value !== 'string') return null;
@@ -7,62 +13,58 @@ function parseRangeHeader(value) {
     return value.trim();
 }
 
-function pipeStreamToResponse(body, res) {
-    return new Promise((resolve, reject) => {
-        let settled = false;
-
-        const finish = (err) => {
-            if (settled) return;
-            settled = true;
-            body.removeListener('error', onError);
-            res.removeListener('error', onError);
-            res.removeListener('finish', onFinish);
-            res.removeListener('close', onClose);
-            if (err) reject(err);
-            else resolve();
-        };
-
-        const onError = (err) => finish(err);
-        const onFinish = () => finish();
-        const onClose = () => {
-            if (!res.writableFinished) {
-                try {
-                    body.destroy?.();
-                } catch {
-                    // ignore
-                }
-            }
-            finish();
-        };
-
-        body.on('error', onError);
-        res.on('error', onError);
-        res.on('finish', onFinish);
-        res.on('close', onClose);
-        body.pipe(res);
-    });
+function shouldIgnoreRange(key) {
+    return IMAGE_PREFIX_RE.test(key);
 }
 
-async function sendBody(res, body) {
-    if (!body) {
-        res.end();
-        return;
+function getCachedObject(key) {
+    const entry = mediaCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.at > CACHE_TTL_MS) {
+        mediaCache.delete(key);
+        return null;
     }
+    return entry;
+}
+
+function setCachedObject(key, object) {
+    if (!shouldIgnoreRange(key)) return;
+    if (mediaCache.size >= CACHE_MAX) {
+        const oldest = mediaCache.keys().next().value;
+        mediaCache.delete(oldest);
+    }
+    mediaCache.set(key, { ...object, at: Date.now() });
+}
+
+async function readBodyBytes(body) {
+    if (!body) return Buffer.alloc(0);
 
     if (typeof body.transformToByteArray === 'function') {
         const bytes = await body.transformToByteArray();
-        if (!res.writableEnded) {
-            res.send(Buffer.from(bytes));
+        return Buffer.from(bytes);
+    }
+
+    if (typeof body[Symbol.asyncIterator] === 'function') {
+        const chunks = [];
+        for await (const chunk of body) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
         }
-        return;
+        return Buffer.concat(chunks);
     }
 
-    if (typeof body.pipe === 'function') {
-        await pipeStreamToResponse(body, res);
-        return;
-    }
+    return Buffer.alloc(0);
+}
 
-    res.end();
+function writeHeaders(res, object, byteLength) {
+    res.setHeader('Content-Type', object.contentType);
+    res.setHeader('Cache-Control', object.cacheControl);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Length', String(byteLength));
+    res.setHeader('Connection', 'close');
+
+    if (object.partial && object.contentRange) {
+        res.setHeader('Content-Range', object.contentRange);
+    }
 }
 
 export default async function handler(req, res) {
@@ -77,37 +79,70 @@ export default async function handler(req, res) {
         return;
     }
 
+    let bodyStream = null;
+
     try {
-        const range = parseRangeHeader(req.headers.range);
-        const object = await readMedia(key, { range });
+        const ignoreRange = shouldIgnoreRange(key);
+        const range = ignoreRange ? null : parseRangeHeader(req.headers.range);
 
-        res.setHeader('Content-Type', object.contentType);
-        res.setHeader('Cache-Control', object.cacheControl);
-        res.setHeader('Accept-Ranges', 'bytes');
-
-        if (object.contentLength != null) {
-            res.setHeader('Content-Length', String(object.contentLength));
-        }
-
-        if (object.partial) {
-            res.status(206);
-            if (object.contentRange) {
-                res.setHeader('Content-Range', object.contentRange);
+        const cached = ignoreRange ? getCachedObject(key) : null;
+        if (cached?.bytes) {
+            if (req.method === 'HEAD') {
+                writeHeaders(res, cached, cached.bytes.length);
+                res.status(200);
+                res.end();
+                return;
             }
-        }
-
-        if (req.method === 'HEAD') {
-            res.status(object.partial ? 206 : 200).end();
+            writeHeaders(res, cached, cached.bytes.length);
+            res.status(200);
+            res.end(cached.bytes);
             return;
         }
 
-        if (!object.partial) {
-            res.status(200);
+        const object = req.method === 'HEAD' && !range
+            ? await headMedia(key)
+            : await readMedia(key, { range });
+
+        bodyStream = object.body;
+
+        if (req.method === 'HEAD') {
+            if (bodyStream) {
+                await readBodyBytes(bodyStream);
+                bodyStream = null;
+            }
+            writeHeaders(res, object, object.contentLength ?? 0);
+            res.status(object.partial ? 206 : 200);
+            res.end();
+            return;
         }
 
-        await sendBody(res, object.body);
+        const bytes = await readBodyBytes(bodyStream);
+        bodyStream = null;
+
+        if (ignoreRange) {
+            setCachedObject(key, {
+                bytes,
+                contentType: object.contentType,
+                cacheControl: object.cacheControl,
+                partial: false,
+                contentRange: null
+            });
+        }
+
+        writeHeaders(res, object, bytes.length);
+        res.status(ignoreRange ? 200 : (object.partial ? 206 : 200));
+        res.end(bytes);
     } catch (err) {
+        if (bodyStream) {
+            try {
+                await readBodyBytes(bodyStream);
+            } catch {
+                // ignore cleanup errors
+            }
+        }
         console.error('media serve error:', key, err);
-        res.status(404).json({ error: 'Medya bulunamadı.' });
+        if (!res.headersSent) {
+            res.status(404).json({ error: 'Medya bulunamadı.' });
+        }
     }
 }

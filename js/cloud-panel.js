@@ -32,9 +32,21 @@ async function cloudFetch(action, params = {}) {
         headers: { Authorization: `Bearer ${session.access_token}` }
     });
 
-    const data = await res.json().catch(() => ({}));
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+        throw new Error('Bulut API yanıtı geçersiz.');
+    }
+
+    const data = await res.json().catch(() => {
+        throw new Error('Bulut API yanıtı okunamadı.');
+    });
+
     if (!res.ok) {
         throw new Error(data.error || 'Bulut isteği başarısız.');
+    }
+
+    if (action === 'access' && data.allowed !== true) {
+        throw new Error('Bulut YP erişimi yok.');
     }
 
     return data;

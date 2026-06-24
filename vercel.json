@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/media-serve.js": {
+      "maxDuration": 15
+    }
+  },
   "rewrites": [
     { "source": "/api/media/(.*)", "destination": "/api/media-serve?key=$1" },
     { "source": "/((?!api/|js/|css/|shared/|icons/|favicon\\.png|manifest\\.json|service-worker\\.js|robots\\.txt|sitemap\\.xml).*)", "destination": "/index.html" }

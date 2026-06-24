@@ -150,6 +150,11 @@ export function displayMediaUrl(input) {
     if (!input || typeof input !== 'string') return null;
     if (input.startsWith('blob:')) return input;
 
+    const mediaPath = extractMediaPath(input);
+    if (mediaPath && R2_PUBLIC_BASE_URL) {
+        return `${R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${mediaPath}`;
+    }
+
     const path = toMediaUrl(input);
     if (!path) return null;
     if (path.startsWith('http://') || path.startsWith('https://')) return path;

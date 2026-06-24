@@ -27,8 +27,15 @@ import {
     loadLocations,
     formatGroupRoomTitle,
     DEFAULT_LOCATION,
-    MESSAGE_HISTORY_LIMIT
+    MESSAGE_HISTORY_LIMIT,
+    ABROAD_LOCATION,
+    isAbroadLocation
 } from './config.js';
+import {
+    initAbroadCityField,
+    formatRadarDistanceLabel,
+    readAbroadCityInput
+} from './location-abroad.js';
 import {
     joinGroupRoom,
     joinDmRoom,
@@ -132,6 +139,7 @@ let pendingForward = null;
 let pendingForwardSourceChat = null;
 let pendingComposerMedia = null;
 let currentMyDistrict = DEFAULT_LOCATION;
+let currentMyAbroadCity = null;
 let currentMyUsername = 'Misafir';
 let currentMyIsVisible = false;
 let currentMyAvatarUrl = null;
@@ -148,7 +156,10 @@ const dmTitles = new Map();
 let mostRecentDmChat = null;
 
 function saveAppRoute() {
-    const activePanel = document.querySelector('.view-panel.active')?.id;
+    let activePanel = document.querySelector('.view-panel.active')?.id;
+    if (activePanel === 'bulut-panel' && !isCloudAdminUser()) {
+        activePanel = 'chat-panel';
+    }
     const username = currentActiveChat?.startsWith('User-')
         ? dmTitles.get(currentActiveChat.replace('User-', ''))
         : null;
@@ -267,6 +278,10 @@ async function restoreAppRoute(route) {
             return;
         }
         await openCloudPanel();
+        if (!isCloudAdminUser()) {
+            await showChatListHome();
+            replaceAppPath('/');
+        }
         return;
     }
 
@@ -417,10 +432,39 @@ function promptEnableRadarVisibility() {
     document.getElementById('notifyModalClose')?.addEventListener('click', hideActions, { once: true });
 }
 
-function requireRadarVisibility() {
+async function ensureRadarVisible() {
+    await profileReadyPromise;
+
     if (currentMyIsVisible) return true;
+
+    const checkbox = document.getElementById('isVisibleInput');
+    if (checkbox?.checked) {
+        currentMyIsVisible = true;
+        return true;
+    }
+
+    if (currentUserId) {
+        const { data } = await supabase
+            .from('profiles')
+            .select('is_visible')
+            .eq('id', currentUserId)
+            .maybeSingle();
+
+        if (data?.is_visible === true) {
+            currentMyIsVisible = true;
+            if (checkbox) checkbox.checked = true;
+            return true;
+        }
+    }
+
     promptEnableRadarVisibility();
     return false;
+}
+
+function initProfileVisibility() {
+    document.getElementById('isVisibleInput')?.addEventListener('change', (event) => {
+        currentMyIsVisible = event.target.checked === true;
+    });
 }
 
 function initProfileAvatar() {
@@ -538,6 +582,18 @@ async function removeProfileAvatar() {
 function populateDistrictSelects() {
     populateLocationSelect(document.getElementById('districtInput'), currentMyDistrict);
     populateLocationSelect(document.getElementById('register-district'), DEFAULT_LOCATION);
+    initAbroadCityField({
+        selectEl: document.getElementById('districtInput'),
+        wrapEl: document.getElementById('profileAbroadCityWrap'),
+        inputEl: document.getElementById('profileAbroadCityInput'),
+        initialDistrict: currentMyDistrict,
+        initialCity: currentMyAbroadCity
+    });
+    initAbroadCityField({
+        selectEl: document.getElementById('register-district'),
+        wrapEl: document.getElementById('registerAbroadCityWrap'),
+        inputEl: document.getElementById('registerAbroadCityInput')
+    });
 }
 
 function updateMessageInputState() {
@@ -595,6 +651,11 @@ window.switchView = function (panelId) {
         return;
     }
 
+    if (panelId === 'bulut-panel' && !isCloudAdminUser()) {
+        void openCloudPanel();
+        return;
+    }
+
     if (panelId === 'profile-panel' || panelId === 'bulut-panel') {
         showMainContentView();
     }
@@ -648,13 +709,13 @@ function openRadarMobileFromHome() {
     document.body.classList.add('radar-open-view');
 }
 
-window.toggleRadarPanel = function () {
+window.toggleRadarPanel = async function () {
     if (!isLoggedIn()) {
         promptLogin();
         return;
     }
 
-    if (!requireRadarVisibility()) return;
+    if (!(await ensureRadarVisible())) return;
 
     const panel = document.getElementById('radarPanel');
     const willOpen = !panel.classList.contains('open');
@@ -817,6 +878,9 @@ function withTimeout(promise, ms, message) {
 
 function callLegacyNearbyUsers(maxKm) {
     const coords = getLocationCoords(currentMyDistrict || DEFAULT_LOCATION);
+    if (!coords) {
+        return supabase.rpc('get_radar_users_without_distance');
+    }
     return supabase.rpc('get_nearby_users', {
         my_lat: coords.lat,
         my_lon: coords.lon,
@@ -831,7 +895,7 @@ async function fetchNearbyUsers(maxKm) {
 async function loadProfile() {
     const { data, error } = await supabase
         .from('profiles')
-        .select('username, district, current_district, is_visible, avatar_url, avatar_r2_key')
+        .select('username, district, current_district, is_visible, avatar_url, avatar_r2_key, abroad_city')
         .eq('id', currentUserId)
         .single();
 
@@ -849,16 +913,18 @@ async function loadProfile() {
         currentMyIsVisible = false;
         currentMyAvatarUrl = null;
         currentMyAvatarR2Key = null;
+        currentMyAbroadCity = null;
     } else {
         currentMyDistrict = data.current_district || data.district;
         currentMyUsername = data.username;
         currentMyIsVisible = data.is_visible === true;
         currentMyAvatarUrl = data.avatar_url || null;
         currentMyAvatarR2Key = data.avatar_r2_key || null;
+        currentMyAbroadCity = data.abroad_city || null;
     }
 
     document.getElementById('usernameInput').value = currentMyUsername;
-    populateLocationSelect(document.getElementById('districtInput'), currentMyDistrict);
+    populateDistrictSelects();
 
     const visibleInput = document.getElementById('isVisibleInput');
     if (visibleInput) visibleInput.checked = currentMyIsVisible;
@@ -881,6 +947,9 @@ async function saveProfile() {
     const newDistrict = document.getElementById('districtInput').value;
     const newName = sanitizeText(document.getElementById('usernameInput').value, 24);
     const isVisible = document.getElementById('isVisibleInput')?.checked === true;
+    const abroadCity = isAbroadLocation(newDistrict)
+        ? readAbroadCityInput(document.getElementById('profileAbroadCityInput'))
+        : null;
 
     if (!isValidUsername(newName)) {
         showNotify('Rumuz 2-24 karakter olmalı; harf, rakam, _ . - kullanılabilir.', {
@@ -902,6 +971,7 @@ async function saveProfile() {
         username: newName,
         district: newDistrict,
         current_district: newDistrict,
+        abroad_city: abroadCity,
         is_visible: isVisible,
         updated_at: new Date().toISOString()
     }).eq('id', currentUserId);
@@ -917,6 +987,7 @@ async function saveProfile() {
     }
 
     currentMyDistrict = newDistrict;
+    currentMyAbroadCity = abroadCity;
     currentMyUsername = newName;
     currentMyIsVisible = isVisible;
     refreshTopbarMenu();
@@ -2191,8 +2262,8 @@ async function toggleMessageReaction({ messageId, clientId, emoji }) {
     }).catch((err) => console.error('Tepki yayını başarısız:', err));
 }
 
-const RADAR_RANGE_KM = { 10: 10, 20: 20, 50: 50, all: 2500 };
-const DEFAULT_RADAR_RANGE = 50;
+const RADAR_RANGE_KM = { 10: 10, 20: 20, 50: 50, all: 5000 };
+const DEFAULT_RADAR_RANGE = 'all';
 
 async function searchRadar(range = DEFAULT_RADAR_RANGE) {
     if (!isLoggedIn()) {
@@ -2200,9 +2271,7 @@ async function searchRadar(range = DEFAULT_RADAR_RANGE) {
         return;
     }
 
-    if (!requireRadarVisibility()) return;
-
-    await profileReadyPromise;
+    if (!(await ensureRadarVisible())) return;
 
     const searchId = ++radarSearchId;
 
@@ -2238,7 +2307,12 @@ async function searchRadar(range = DEFAULT_RADAR_RANGE) {
             return;
         }
 
-        const users = data || [];
+        const users = (data || []).slice().sort((a, b) => {
+            const distA = a.distance_km == null ? Number.POSITIVE_INFINITY : Number(a.distance_km) || 0;
+            const distB = b.distance_km == null ? Number.POSITIVE_INFINITY : Number(b.distance_km) || 0;
+            if (distA !== distB) return distA - distB;
+            return (a.username || '').localeCompare(b.username || '', 'tr');
+        });
 
         if (users.length === 0) {
             const empty = document.createElement('div');
@@ -2254,7 +2328,9 @@ async function searchRadar(range = DEFAULT_RADAR_RANGE) {
             card.addEventListener('click', () => startNewChat(
                 user.user_id,
                 user.username,
-                user.distance_km === 0 ? 'Aynı konum' : `${user.distance_km} km`,
+                user.distance_km == null
+                    ? (user.district || ABROAD_LOCATION)
+                    : (user.distance_km === 0 ? 'Aynı konum' : `${user.distance_km} km`),
                 user.avatar_url
             ));
 
@@ -2268,9 +2344,7 @@ async function searchRadar(range = DEFAULT_RADAR_RANGE) {
 
             const dist = document.createElement('div');
             dist.className = 'card-dist';
-            dist.textContent = user.distance_km === 0
-                ? `📍 Aynı konum · ${user.district || ''}`
-                : `📍 ${user.distance_km} km · ${user.district || ''}`;
+            dist.textContent = formatRadarDistanceLabel(user);
 
             card.append(avatar, name, dist);
             carousel.appendChild(card);
@@ -2743,6 +2817,7 @@ async function initDashboard() {
     });
     runInitStep('populateDistrictSelects', populateDistrictSelects);
     runInitStep('initProfileAvatar', initProfileAvatar);
+    runInitStep('initProfileVisibility', initProfileVisibility);
     runInitStep('initPushControls', initPushControls);
     runInitStep('initNotificationCenter', () => initNotificationCenter({
         onNavigate: (route) => {

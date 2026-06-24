@@ -17,6 +17,7 @@ export {
 
 export const ISTANBUL_ANADOLU = 'İstanbul Anadolu';
 export const ISTANBUL_AVRUPA = 'İstanbul Avrupa';
+export const ABROAD_LOCATION = 'Yurtdışı';
 export const DEFAULT_LOCATION = ISTANBUL_ANADOLU;
 export const DEFAULT_DISTRICT = DEFAULT_LOCATION;
 
@@ -27,7 +28,8 @@ export const LOCATION_COORDS = {
 
 const LOCATION_SLUG_ALIASES = {
     [ISTANBUL_ANADOLU]: 'istanbul-anadolu',
-    [ISTANBUL_AVRUPA]: 'istanbul-avrupa'
+    [ISTANBUL_AVRUPA]: 'istanbul-avrupa',
+    [ABROAD_LOCATION]: 'yurtdisi'
 };
 
 const LEGACY_DISTRICT_SLUGS = {
@@ -46,7 +48,17 @@ export function formatGroupRoomTitle(location) {
 }
 
 export function getLocationCoords(location) {
+    if (isAbroadLocation(location)) return null;
     return LOCATION_COORDS[location] || LOCATION_COORDS[DEFAULT_LOCATION];
+}
+
+export function isAbroadLocation(location) {
+    return location === ABROAD_LOCATION;
+}
+
+function ensureAbroadInLocationList(names) {
+    const list = names.filter((name) => name !== ABROAD_LOCATION);
+    return [ABROAD_LOCATION, ...list];
 }
 
 export const getDistrictCoords = getLocationCoords;
@@ -111,7 +123,9 @@ export async function loadLocations(client) {
         .order('district');
     if (error) throw error;
 
-    const names = sortLocationNames((data || []).map((row) => row.district));
+    const names = ensureAbroadInLocationList(
+        sortLocationNames((data || []).map((row) => row.district))
+    );
     locationNamesCache = names;
     for (const row of data || []) {
         LOCATION_COORDS[row.district] = { lat: row.latitude, lon: row.longitude };
@@ -122,9 +136,10 @@ export async function loadLocations(client) {
 
 export function populateLocationSelect(selectEl, selectedValue = DEFAULT_LOCATION) {
     if (!selectEl) return;
-    const names = locationNamesCache?.length
+    const base = locationNamesCache?.length
         ? locationNamesCache
-        : LOCATION_SORT_PRIORITY;
+        : ensureAbroadInLocationList(LOCATION_SORT_PRIORITY);
+    const names = ensureAbroadInLocationList(base);
     const current = selectedValue || selectEl.value || DEFAULT_LOCATION;
     selectEl.innerHTML = '';
     for (const name of names) {

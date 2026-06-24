@@ -50,7 +50,7 @@ function buildThumb(kind, src) {
 
     const img = el('img', 'media-thumb');
     img.alt = '';
-    img.loading = 'eager';
+    img.loading = 'lazy';
     img.decoding = 'async';
     img.src = resolved;
     return img;
@@ -58,6 +58,7 @@ function buildThumb(kind, src) {
 
 function markThumbLoadError(card, thumb, resolved, mediaR2Key = null) {
     if (card.classList.contains('media-card--error')) return;
+    if (card.dataset.mediaFailed === '1') return;
 
     const retry = Number(card.dataset.mediaRetry || 0);
     const host = card.closest('.message-media');
@@ -67,11 +68,15 @@ function markThumbLoadError(card, thumb, resolved, mediaR2Key = null) {
     const next = retry + 1;
 
     if (thumb?.tagName === 'IMG' && next < candidates.length) {
-        card.dataset.mediaRetry = String(next);
-        thumb.src = candidates[next];
-        return;
+        const nextSrc = candidates[next];
+        if (nextSrc && nextSrc !== thumb.src) {
+            card.dataset.mediaRetry = String(next);
+            thumb.src = nextSrc;
+            return;
+        }
     }
 
+    card.dataset.mediaFailed = '1';
     thumb?.remove();
     card.classList.add('media-card--error');
     if (!card.querySelector('.media-card-label')) {

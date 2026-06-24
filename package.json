@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "local": "vercel dev --listen 3000",
+    "local": "node scripts/local-dev.mjs",
+    "local:vercel": "vercel dev --listen 3000",
     "static": "serve . -l 3000 -c serve.json"
   },
   "dependencies": {
