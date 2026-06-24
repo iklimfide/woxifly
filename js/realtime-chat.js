@@ -2,6 +2,8 @@ let activeChannel = null;
 let activeRoomKey = null;
 let supabaseClient = null;
 const seenClientIds = new Set();
+const notificationChannels = new Map();
+const notificationSeenClientIds = new Set();
 
 function presenceKey(userId) {
     return userId;
@@ -18,6 +20,50 @@ export function leaveRealtimeRoom() {
     activeChannel = null;
     activeRoomKey = null;
     clearSeenBroadcasts();
+}
+
+export function leaveDmNotificationRooms() {
+    if (supabaseClient) {
+        for (const channel of notificationChannels.values()) {
+            supabaseClient.removeChannel(channel);
+        }
+    }
+    notificationChannels.clear();
+    notificationSeenClientIds.clear();
+}
+
+/**
+ * Açık olmayan DM sohbetlerinde gelen mesajlar için arka plan dinleyicileri.
+ */
+export function syncDmNotificationRooms(supabase, conversationIds, { activeConversationId = null, onMessage } = {}) {
+    supabaseClient = supabase;
+    const targetIds = new Set((conversationIds || []).filter(Boolean));
+
+    for (const [convId, channel] of notificationChannels) {
+        if (!targetIds.has(convId) || convId === activeConversationId) {
+            supabase.removeChannel(channel);
+            notificationChannels.delete(convId);
+        }
+    }
+
+    for (const convId of targetIds) {
+        if (convId === activeConversationId || notificationChannels.has(convId)) continue;
+
+        const roomKey = `dm:${convId}`;
+        const channel = supabase.channel(roomKey, {
+            config: { broadcast: { ack: false, self: false } }
+        });
+
+        channel.on('broadcast', { event: 'shout' }, ({ payload }) => {
+            if (!payload?.client_id) return;
+            if (seenClientIds.has(payload.client_id)) return;
+            if (notificationSeenClientIds.has(payload.client_id)) return;
+            notificationSeenClientIds.add(payload.client_id);
+            onMessage?.(payload, convId);
+        }).subscribe();
+
+        notificationChannels.set(convId, channel);
+    }
 }
 
 /**

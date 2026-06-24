@@ -28,6 +28,8 @@ import {
 import {
     joinDmRoom,
     leaveRealtimeRoom,
+    leaveDmNotificationRooms,
+    syncDmNotificationRooms,
     broadcastShout,
     broadcastReaction,
     broadcastMessageDelete
@@ -603,6 +605,7 @@ async function showChatListHome() {
     currentActiveChat = null;
     currentConversationId = null;
     leaveRealtimeRoom();
+    refreshDmNotificationListeners();
     clearPendingQuote();
     clearPendingComposerMedia();
     clearPendingForward();
@@ -988,11 +991,47 @@ function handleIncomingBroadcast(payload) {
         quote: payload.quote || null
     });
 
-    maybeShowForegroundNotification(payload, currentActiveChat);
+    notifyIncomingDmMessage(payload, currentConversationId);
+}
 
-    if (shouldCaptureInAppNotification()) {
+function getUserIdForConversation(conversationId) {
+    if (!conversationId) return null;
+    for (const [userId, convId] of dmConversations) {
+        if (convId === conversationId) return userId;
+    }
+    return null;
+}
+
+function refreshDmNotificationListeners() {
+    if (!isLoggedIn()) {
+        leaveDmNotificationRooms();
+        return;
+    }
+
+    const conversationIds = [...new Set(dmConversations.values())];
+    syncDmNotificationRooms(supabase, conversationIds, {
+        activeConversationId: currentConversationId,
+        onMessage: handleIncomingDmNotification
+    });
+}
+
+function notifyIncomingDmMessage(payload, conversationId) {
+    if (!payload || payload.sender_id === currentUserId) return;
+
+    const partnerUserId = getUserIdForConversation(conversationId) || payload.sender_id;
+    const chatId = partnerUserId ? `User-${partnerUserId}` : currentActiveChat;
+    if (!chatId?.startsWith('User-')) return;
+
+    const notifyOpts = {
+        viewingConversationId: currentConversationId,
+        messageConversationId: conversationId
+    };
+
+    maybeShowForegroundNotification(payload, notifyOpts);
+
+    if (shouldCaptureInAppNotification(notifyOpts)) {
         addInAppNotification({
-            chatId: currentActiveChat,
+            chatId,
             title: payload.sender_name || 'Özel Sohbet',
             senderId: payload.sender_id || null,
             senderName: payload.sender_name || null,
@@ -1001,7 +1040,12 @@ function handleIncomingBroadcast(payload) {
         });
     }
 
-    syncDmSidebarPreview(currentActiveChat, payload, false);
+    syncDmSidebarPreview(chatId, payload, false);
+}
+
+function handleIncomingDmNotification(payload, conversationId) {
+    if (conversationId === currentConversationId) return;
+    notifyIncomingDmMessage(payload, conversationId);
 }
 
 function handleIncomingReactionBroadcast(payload) {
@@ -1754,6 +1798,7 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
     }
 
     subscribeDmRealtime(currentConversationId);
+    refreshDmNotificationListeners();
     await loadMessageHistory(currentConversationId);
 
     await deliverPendingForward();
@@ -2194,6 +2239,7 @@ async function loadDmHistory() {
         };
     }
 
+    refreshDmNotificationListeners();
     return mostRecentDmChat;
 }
 
@@ -2201,6 +2247,7 @@ async function handleLogout() {
     if (!isLoggedIn()) return;
 
     leaveRealtimeRoom();
+    leaveDmNotificationRooms();
     await supabase.auth.signOut();
     currentUserId = null;
     currentMyUsername = 'Misafir';

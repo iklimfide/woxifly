@@ -355,9 +355,14 @@ export function closeNotificationDropdown() {
     closeNotificationMenu();
 }
 
-export function shouldCaptureInAppNotification() {
-    const onChatPanel = document.getElementById('chat-panel')?.classList.contains('active');
-    if (!onChatPanel) return true;
+export function shouldCaptureInAppNotification({
+    viewingConversationId = null,
+    messageConversationId = null
+} = {}) {
+    const viewingSameChat = viewingConversationId
+        && messageConversationId
+        && viewingConversationId === messageConversationId;
+    if (!viewingSameChat) return true;
     if (document.hidden || !document.hasFocus()) return true;
     return false;
 }

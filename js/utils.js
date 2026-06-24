@@ -85,7 +85,8 @@ export function formatQuotePreview(quote) {
     if (contentType === 'audio') return '🎙️ Ses';
     const body = quote?.body || '';
     if (!body) return 'Mesaj';
-    return body.length > 120 ? `${body.slice(0, 120)}…` : body;
+    const shortened = shortenUrlsInPlainText(body);
+    return shortened.length > 120 ? `${shortened.slice(0, 120)}…` : shortened;
 }
 
 export function isQuoteFromViewer(quote, { userId = null, username = null } = {}) {
@@ -111,6 +112,35 @@ const URL_REGEX = /\b((?:https?:\/\/)[^\s<]+|(?:www\.)[^\s<]+|(?:[a-zA-Z0-9](?:[
 
 function trimTrailingUrlPunctuation(url) {
     return url.replace(/[.,;:!?)}\]]+$/g, '');
+}
+
+function formatUrlDisplayLabel(href, rawUrl) {
+    const cleaned = trimTrailingUrlPunctuation(rawUrl);
+
+    try {
+        const parsed = new URL(href);
+        const tail = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+        const shouldShorten = cleaned.length > 48 || (tail.length > 1 && tail !== '/');
+        if (!shouldShorten) return cleaned;
+        return `${parsed.origin}/......`;
+    } catch {
+        if (cleaned.length <= 48) return cleaned;
+        const schemeEnd = cleaned.indexOf('//');
+        const pathStart = schemeEnd === -1 ? cleaned.indexOf('/') : cleaned.indexOf('/', schemeEnd + 2);
+        if (pathStart === -1) return `${cleaned.slice(0, 40)}......`;
+        return `${cleaned.slice(0, pathStart)}/......`;
+    }
+}
+
+function shortenUrlsInPlainText(text) {
+    if (!text) return text;
+    URL_REGEX.lastIndex = 0;
+    return text.replace(URL_REGEX, (rawUrl, offset) => {
+        if (isEmailContext(text, offset)) return rawUrl;
+        const href = toSafeHref(rawUrl);
+        if (!href) return rawUrl;
+        return formatUrlDisplayLabel(href, rawUrl);
+    });
 }
 
 function toSafeHref(rawUrl) {
@@ -153,10 +183,12 @@ export function appendTextWithLinks(parent, text) {
         }
 
         if (href) {
+            const displayUrl = formatUrlDisplayLabel(href, rawUrl);
             const link = document.createElement('a');
             link.className = 'message-link';
             link.href = href;
-            link.textContent = trimTrailingUrlPunctuation(rawUrl);
+            link.textContent = displayUrl;
+            link.title = trimTrailingUrlPunctuation(rawUrl);
             link.addEventListener('click', (event) => {
                 event.preventDefault();
                 openLink(href);

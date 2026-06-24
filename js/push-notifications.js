@@ -334,11 +334,16 @@ export function buildNotificationDataFromPayload(payload, activeChatId) {
     return null;
 }
 
-export function maybeShowForegroundNotification(payload, activeChatId) {
+export function maybeShowForegroundNotification(payload, {
+    viewingConversationId = null,
+    messageConversationId = null
+} = {}) {
     if (!pushSupported || !profilePushEnabled || Notification.permission !== 'granted') return;
 
-    const onChatPanel = document.getElementById('chat-panel')?.classList.contains('active');
-    if (!document.hidden && document.hasFocus() && onChatPanel) return;
+    const viewingSameChat = viewingConversationId
+        && messageConversationId
+        && viewingConversationId === messageConversationId;
+    if (!document.hidden && document.hasFocus() && viewingSameChat) return;
 
     const data = buildNotificationDataFromPayload(payload, activeChatId);
     if (!data) return;

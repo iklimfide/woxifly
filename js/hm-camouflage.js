@@ -1,4 +1,17 @@
 import { applySiteSeo } from './seo.js';
+import {
+    CALC_TITLE,
+    CALC_SHORT_NAME,
+    CALC_DESCRIPTION,
+    SITE_NAME,
+    SITE_DESCRIPTION,
+    APP_ICON_192,
+    APP_ICON_512,
+    APP_FAVICON,
+    CALC_ICON_192,
+    CALC_ICON_512,
+    CALC_FAVICON
+} from '../shared/seo-config.js';
 
 const HM_STORAGE_KEY = 'hm_perde';
 const HM_PIN_KEY = 'hm_pin';
@@ -22,20 +35,47 @@ export function getHmPin() {
     return pin && /^\d{4,8}$/.test(pin) ? pin : DEFAULT_PIN;
 }
 
+function setLinkIcon(rel, href) {
+    let link = document.querySelector(`link[rel="${rel}"]`);
+    if (!link) {
+        link = document.createElement('link');
+        link.rel = rel;
+        document.head.appendChild(link);
+    }
+    link.href = href;
+    if (rel === 'icon') link.type = 'image/png';
+}
+
+export function updatePageIcons(isCalculatorMode) {
+    if (isCalculatorMode) {
+        setLinkIcon('icon', CALC_FAVICON);
+        setLinkIcon('apple-touch-icon', CALC_ICON_192);
+    } else {
+        setLinkIcon('icon', APP_FAVICON);
+        setLinkIcon('apple-touch-icon', APP_ICON_192);
+    }
+}
+
 export function updatePWAManifest(isCalculatorMode) {
     const manifest = {
-        name: isCalculatorMode ? 'calculator' : 'woxifly',
-        short_name: isCalculatorMode ? 'calculator' : 'woxifly',
-        description: isCalculatorMode
-            ? 'Hesap makinesi — toplama, çıkarma ve çarpma.'
-            : 'Gizliliğe önem veren ilçe bazlı mesajlaşma platformu.',
+        name: isCalculatorMode ? CALC_TITLE : SITE_NAME,
+        short_name: isCalculatorMode ? CALC_SHORT_NAME : SITE_NAME,
+        description: isCalculatorMode ? CALC_DESCRIPTION : SITE_DESCRIPTION,
         start_url: '/',
         display: 'standalone',
-        background_color: '#000000',
-        theme_color: '#000000',
+        background_color: isCalculatorMode ? '#000000' : '#fdfbf7',
+        theme_color: isCalculatorMode ? '#000000' : '#2077c5',
         icons: [
-            { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-            { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }
+            {
+                src: isCalculatorMode ? CALC_ICON_192 : APP_ICON_192,
+                sizes: '192x192',
+                type: 'image/png'
+            },
+            {
+                src: isCalculatorMode ? CALC_ICON_512 : APP_ICON_512,
+                sizes: '512x512',
+                type: 'image/png'
+            }
         ]
     };
 
@@ -45,6 +85,7 @@ export function updatePWAManifest(isCalculatorMode) {
     }
 
     applySiteSeo(isCalculatorMode);
+    updatePageIcons(isCalculatorMode);
 
     const themeColor = document.querySelector('meta[name="theme-color"]');
     if (themeColor) {

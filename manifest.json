@@ -1,7 +1,7 @@
 {
-  "name": "woxifly",
-  "short_name": "woxifly",
-  "description": "Gizliliğe önem veren ilçe bazlı mesajlaşma platformu. İstanbul ilçe odalarında sohbet ve özel mesaj.",
+  "name": "Woxifly",
+  "short_name": "Woxifly",
+  "description": "Gizliliğe önem veren özel mesajlaşma platformu. Hesap makinesi kamuflajı ile güvenli sohbet.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#fdfbf7",
