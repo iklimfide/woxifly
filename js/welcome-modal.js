@@ -40,10 +40,13 @@ export function initWelcomeModal({ isLoggedIn, onLogin: loginHandler, onRegister
 
     modal.addEventListener('click', (event) => event.stopPropagation());
 
-    document.getElementById('welcomeLoginBtn')?.addEventListener('click', () => {
+    const openLogin = () => {
         closeWelcomeModal();
         onLogin?.();
-    });
+    };
+
+    document.getElementById('welcomeLoginPrimaryBtn')?.addEventListener('click', openLogin);
+    document.getElementById('welcomeLoginBtn')?.addEventListener('click', openLogin);
 
     document.getElementById('welcomeRegisterBtn')?.addEventListener('click', () => {
         closeWelcomeModal();

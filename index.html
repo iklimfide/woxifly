@@ -929,6 +929,13 @@
             flex-shrink: 0;
         }
 
+        .media-composer-thumbs {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
         .media-composer-thumb--icon {
             display: flex;
             align-items: center;
@@ -1542,7 +1549,26 @@
         .profile-card { background: #ffffff; width: 100%; max-width: 600px; padding: 20px 16px; border-radius: 12px; border: 1px solid var(--border-color); height: fit-content; }
         .form-group { margin-bottom: 16px; }
         .form-group label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 8px; color: #4a5568; }
-        .form-group input, .form-group select { width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background-color: #f7fafc; font-size: 16px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background-color: #f7fafc; font-size: 16px; }
+
+        .form-group textarea {
+            min-height: 96px;
+            resize: vertical;
+            line-height: 1.45;
+        }
+
+        .form-group select:focus,
+        .form-group textarea:focus,
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px rgba(46, 138, 221, 0.15);
+        }
+
+        .form-group select optgroup {
+            font-weight: 700;
+            color: #2d3748;
+        }
 
         .password-field {
             position: relative;
@@ -1645,6 +1671,132 @@
             font-weight: 700;
             margin-bottom: 8px;
             color: var(--text-main);
+        }
+
+        .profile-share-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: -4px;
+        }
+
+        .profile-share-link {
+            flex: 1;
+            min-width: 0;
+            padding: 7px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-align: left;
+            cursor: pointer;
+            border: 1px solid var(--border-color);
+            background: #f7fafc;
+            color: var(--accent-color);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .profile-share-link:disabled {
+            cursor: default;
+            color: var(--text-muted);
+        }
+
+        .profile-share-link:not(:disabled):active { transform: scale(0.99); }
+
+        .profile-share-btn {
+            flex-shrink: 0;
+            width: auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            background-color: var(--accent-color);
+            color: #fff;
+        }
+
+        .profile-share-btn:active { transform: scale(0.98); }
+
+        .profile-radio-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .profile-radio {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background-color: #f7fafc;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .profile-radio input {
+            width: 16px;
+            height: 16px;
+            margin: 0;
+            flex-shrink: 0;
+            accent-color: var(--accent-color);
+        }
+
+        .profile-radio span {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .profile-radio:has(input:checked) {
+            border-color: var(--accent-color);
+            background: #ebf5ff;
+        }
+
+        .profile-radio:has(input:disabled) {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .member-profile-card .member-profile-name {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin: 0;
+        }
+
+        .member-profile-field {
+            margin-bottom: 16px;
+        }
+
+        .member-profile-field label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #4a5568;
+        }
+
+        .member-profile-field p {
+            margin: 0;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            color: var(--text-main);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .member-profile-empty {
+            margin: 0 0 16px;
+            font-size: 0.9rem;
+            color: var(--text-muted);
         }
 
         /* BULUT YP */
@@ -2104,6 +2256,28 @@
         .welcome-modal-action {
             margin-top: 24px;
             text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .welcome-modal-btn--secondary {
+            display: block;
+            width: 100%;
+            min-height: 48px;
+            background: #ffffff;
+            color: var(--accent-color);
+            border: 1.5px solid var(--accent-color);
+            padding: 14px 16px;
+            border-radius: 16px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .welcome-modal-btn--secondary:active {
+            opacity: 0.92;
+            transform: scale(0.99);
         }
 
         .welcome-modal-btn--primary {
@@ -2939,7 +3113,7 @@
                     <span class="voice-recording-hint">Durdurmak için 🎤</span>
                 </div>
                 <div class="input-composer-row">
-                    <input type="file" id="fileInput" hidden accept="image/*,video/*,audio/*">
+                    <input type="file" id="fileInput" hidden accept="image/*,video/*,audio/*" multiple>
                     <div class="input-tools">
                         <button type="button" class="input-icon-btn" id="attachBtn" title="Dosya ekle" aria-label="Dosya ekle">📎</button>
                         <button type="button" class="input-icon-btn" id="voiceBtn" title="Ses kaydı" aria-label="Ses kaydı">🎤</button>
@@ -2966,6 +3140,10 @@
                         <input type="file" id="profileAvatarInput" hidden accept="image/jpeg,image/png,image/webp">
                     </div>
                     <div class="form-group"><label>Rumuz</label><input type="text" id="usernameInput" value="Ben"></div>
+                    <div class="form-group profile-share-row">
+                        <button type="button" class="profile-share-link" id="profileShareLink" disabled>—</button>
+                        <button type="button" class="profile-share-btn" id="profileShareBtn">Paylaş</button>
+                    </div>
 
                     <hr class="profile-divider">
                     <h3 class="profile-section-title">Kamuflaj</h3>
@@ -2987,13 +3165,69 @@
                         <p class="form-hint">Hesap makinesinde bu PIN'i girip = tuşuna basın. Sekmeden ayrılınca perde yeniden kapanır.</p>
                     </div>
 
-                    <button class="save-btn" onclick="saveProfile()">Ayarları Kaydet</button>
-
                     <hr class="profile-divider">
                     <h3 class="profile-section-title">Bildirimler</h3>
-                    <p class="form-hint">Bildirimler yalnızca genel bir uyarı gösterir; mesaj içeriği işletim sistemi bildiriminde görünmez.</p>
-                    <button type="button" class="notify-btn" id="pushToggleBtn">Bildirim İzinlerini Yönet</button>
-                    <span class="push-status" id="pushStatusText">Durum kontrol ediliyor…</span>
+                    <div class="form-group profile-radio-group" id="pushRadioGroup">
+                        <label class="profile-radio">
+                            <input type="radio" name="pushEnabled" id="pushRadioOn" value="on">
+                            <span>Açık</span>
+                        </label>
+                        <label class="profile-radio">
+                            <input type="radio" name="pushEnabled" id="pushRadioOff" value="off" checked>
+                            <span>Kapalı</span>
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="profileAboutInput">Hakkımda</label>
+                        <textarea id="profileAboutInput" maxlength="160" placeholder="Kendinizi kısaca tanıtın (5–160 karakter)"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="profileLocationInput">Yaşadığı Yer</label>
+                        <select id="profileLocationInput"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="profileJobInput">Meslek</label>
+                        <select id="profileJobInput"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="profileMaritalInput">Medeni Durum</label>
+                        <select id="profileMaritalInput"></select>
+                    </div>
+
+                    <button class="save-btn" onclick="saveProfile()">Ayarları Kaydet</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- PANEL: ÜYE PROFİLİ -->
+        <div id="member-profile-panel" class="view-panel">
+            <div class="profile-container">
+                <div class="profile-card member-profile-card">
+                    <div class="profile-avatar-row">
+                        <div class="profile-avatar-preview" id="memberProfileAvatar">?</div>
+                        <div class="profile-avatar-actions">
+                            <h2 class="member-profile-name" id="memberProfileUsername">—</h2>
+                        </div>
+                    </div>
+                    <p class="member-profile-empty" id="memberProfileEmpty" hidden>Profil bilgisi paylaşılmamış.</p>
+                    <div class="member-profile-field" id="memberProfileAboutWrap" hidden>
+                        <label>Hakkımda</label>
+                        <p id="memberProfileAbout"></p>
+                    </div>
+                    <div class="member-profile-field" id="memberProfileLocationWrap" hidden>
+                        <label>Yaşadığı Yer</label>
+                        <p id="memberProfileLocation"></p>
+                    </div>
+                    <div class="member-profile-field" id="memberProfileJobWrap" hidden>
+                        <label>Meslek</label>
+                        <p id="memberProfileJob"></p>
+                    </div>
+                    <div class="member-profile-field" id="memberProfileMaritalWrap" hidden>
+                        <label>Medeni Durum</label>
+                        <p id="memberProfileMarital"></p>
+                    </div>
+                    <button type="button" class="save-btn" id="memberProfileMessageBtn">Mesaj gönder</button>
                 </div>
             </div>
         </div>
@@ -3090,13 +3324,6 @@
                     </div>
 
                     <div class="welcome-feature-card">
-                        <div class="welcome-feature-card-icon" aria-hidden="true">🔗</div>
-                        <h4>Özel Mesaj Linki</h4>
-                        <p>Her kullanıcının benzersiz bir profil linki vardır. Linki paylaşan biriyle doğrudan özel sohbet başlatabilirsiniz.</p>
-                        <button type="button" class="welcome-feature-card-cta">Başla</button>
-                    </div>
-
-                    <div class="welcome-feature-card">
                         <div class="welcome-feature-card-icon" aria-hidden="true">💬</div>
                         <h4>7 günde imha</h4>
                         <p>Ses, resim ve video paylaşın. 7 günü dolduran mesajlar arkada dijital iz bırakmadan otomatik olarak silinir.</p>
@@ -3112,6 +3339,7 @@
                 </div>
 
                 <div class="welcome-modal-action">
+                    <button type="button" class="welcome-modal-btn--secondary" id="welcomeLoginPrimaryBtn">Giriş Yap</button>
                     <button type="button" class="welcome-modal-btn--primary" id="welcomeRegisterBtn">Hemen Kaydol</button>
                     <button type="button" class="welcome-modal-login-link" id="welcomeLoginBtn">Zaten bir hesabın var mı? <strong>Giriş Yap</strong></button>
                 </div>

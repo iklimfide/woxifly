@@ -10,8 +10,16 @@ export function usernameToSlug(username) {
         .replace(/[^a-z0-9._-]+/g, '');
 }
 
-export function buildAppPath({ activePanel, currentActiveChat, username } = {}) {
-    if (activePanel === 'profile-panel') return '/profil';
+export function buildAppPath({ activePanel, currentActiveChat, username, profileUsername, memberProfileUsername } = {}) {
+    if (activePanel === 'profile-panel') {
+        const slug = usernameToSlug(profileUsername);
+        if (slug) return `/uye/${slug}`;
+        return '/profil';
+    }
+    if (activePanel === 'member-profile-panel') {
+        const slug = usernameToSlug(memberProfileUsername);
+        if (slug) return `/uye/${slug}/profil`;
+    }
     if (activePanel === 'bulut-panel') return '/bulut';
     if (!currentActiveChat) return '/';
 
@@ -36,6 +44,14 @@ export function parseAppPath(pathname) {
 
     if (path === '/bulut') {
         return { view: 'bulut-panel' };
+    }
+
+    const dmProfileMatch = path.match(/^\/uye\/([^/]+)\/profil$/i);
+    if (dmProfileMatch) {
+        return {
+            view: 'member-profile',
+            usernameSlug: decodeURIComponent(dmProfileMatch[1]).toLowerCase()
+        };
     }
 
     const dmMatch = path.match(/^\/uye\/([^/]+)$/i);
@@ -97,4 +113,9 @@ export function replaceAppPath(path) {
     if (current !== target || window.location.hash) {
         history.replaceState(null, '', target);
     }
+}
+
+export function pushAppPath(path) {
+    const qs = window.location.search;
+    history.pushState(null, '', `${path}${qs}`);
 }

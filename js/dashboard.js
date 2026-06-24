@@ -63,7 +63,8 @@ import {
 import {
     initPushNotifications,
     getPushSubscriptionState,
-    togglePushNotifications,
+    enablePushNotifications,
+    disablePushNotifications,
     notifyPushRecipients,
     syncPushEnabledFromProfile,
     finalizePushInit,
@@ -71,7 +72,7 @@ import {
     parseNotifyQueryParam,
     clearNotifyQueryParam,
     maybeShowForegroundNotification,
-    describePushStatus
+    isPushSupported
 } from './push-notifications.js';
 import {
     configureTopbar,
@@ -107,7 +108,8 @@ import {
     buildAppPath,
     parseAppRoute,
     usernameToSlug,
-    replaceAppPath
+    replaceAppPath,
+    pushAppPath
 } from './app-routes.js';
 import {
     initHmCamouflage,
@@ -116,6 +118,12 @@ import {
     readHmSettingsFromProfile
 } from './hm-camouflage.js';
 import { initSeo } from './seo.js';
+import {
+    initProfileDetailSelects,
+    readProfileDetailFields,
+    applyProfileDetailFields,
+    validateProfileAbout
+} from './profile-options.js';
 import {
     initCloudPanel,
     openCloudPanel,
@@ -138,6 +146,9 @@ let messageHistoryLoadId = 0;
 const dmConversations = new Map();
 const dmTitles = new Map();
 let mostRecentDmChat = null;
+let viewingMemberProfileUserId = null;
+let viewingMemberProfileUsername = null;
+let memberProfileReturnChatId = null;
 
 function saveAppRoute() {
     let activePanel = document.querySelector('.view-panel.active')?.id;
@@ -147,8 +158,18 @@ function saveAppRoute() {
     const username = currentActiveChat?.startsWith('User-')
         ? dmTitles.get(currentActiveChat.replace('User-', ''))
         : null;
+    const profileUsername = activePanel === 'profile-panel' ? currentMyUsername : null;
+    const memberProfileUsername = activePanel === 'member-profile-panel'
+        ? viewingMemberProfileUsername
+        : null;
 
-    replaceAppPath(buildAppPath({ activePanel, currentActiveChat, username }));
+    replaceAppPath(buildAppPath({
+        activePanel,
+        currentActiveChat,
+        username,
+        profileUsername,
+        memberProfileUsername
+    }));
 }
 
 async function resolveUserBySlug(slug) {
@@ -220,10 +241,20 @@ async function openDmByUserId(userId, usernameHint = null, avatarUrl = null) {
     await openChat(`User-${userId}`, username, { avatarUrl });
 }
 
+function isOwnUsernameSlug(usernameSlug) {
+    if (!isLoggedIn() || !usernameSlug) return false;
+    return usernameToSlug(currentMyUsername) === String(usernameSlug).toLowerCase();
+}
+
 async function openDmByUsernameSlug(usernameSlug) {
     if (!isLoggedIn()) {
         await showChatListHome();
         promptLogin();
+        return;
+    }
+
+    if (isOwnUsernameSlug(usernameSlug)) {
+        switchView('profile-panel');
         return;
     }
 
@@ -248,7 +279,25 @@ async function restoreAppRoute(route) {
             return;
         }
         switchView('profile-panel');
-        saveAppRoute();
+        return;
+    }
+
+    if (route.view === 'member-profile') {
+        if (!isLoggedIn()) {
+            await showChatListHome();
+            promptLogin();
+            return;
+        }
+        if (isOwnUsernameSlug(route.usernameSlug)) {
+            switchView('profile-panel');
+            return;
+        }
+        const profile = await resolveUserBySlug(route.usernameSlug);
+        if (!profile) {
+            await showChatListHome();
+            return;
+        }
+        await openMemberProfile(profile.id, { push: false, fromChat: false });
         return;
     }
 
@@ -353,11 +402,229 @@ function refreshAvatarDisplays() {
 }
 
 function openProfileSettings() {
+    viewingMemberProfileUserId = null;
+    viewingMemberProfileUsername = null;
+    memberProfileReturnChatId = null;
+    document.body.classList.remove('member-profile-view');
     switchView('profile-panel');
+}
+
+function setMemberProfileField(wrapId, textId, value) {
+    const wrap = document.getElementById(wrapId);
+    const text = document.getElementById(textId);
+    if (!wrap || !text) return false;
+
+    const content = (value || '').trim();
+    if (!content) {
+        wrap.hidden = true;
+        return false;
+    }
+
+    text.textContent = content;
+    wrap.hidden = false;
+    return true;
+}
+
+function renderMemberProfile(profile) {
+    const username = profile.username || 'Kullanıcı';
+    document.getElementById('memberProfileUsername').textContent = username;
+    applyAvatarDisplay(
+        document.getElementById('memberProfileAvatar'),
+        profile.avatar_url,
+        username,
+        profile.avatar_r2_key
+    );
+
+    const hasAbout = setMemberProfileField('memberProfileAboutWrap', 'memberProfileAbout', profile.about_me);
+    const hasLocation = setMemberProfileField('memberProfileLocationWrap', 'memberProfileLocation', profile.home_location);
+    const hasJob = setMemberProfileField('memberProfileJobWrap', 'memberProfileJob', profile.job);
+    const hasMarital = setMemberProfileField('memberProfileMaritalWrap', 'memberProfileMarital', profile.marital_status);
+
+    const emptyEl = document.getElementById('memberProfileEmpty');
+    if (emptyEl) emptyEl.hidden = hasAbout || hasLocation || hasJob || hasMarital;
+
+    document.getElementById('activeChatName').textContent = username;
+    const activeChatAvatar = document.getElementById('activeChatAvatar');
+    if (activeChatAvatar) activeChatAvatar.hidden = false;
+    applyAvatarDisplay(activeChatAvatar, profile.avatar_url, username, profile.avatar_r2_key);
+
+    const statusEl = document.getElementById('activeChatStatus');
+    if (statusEl) {
+        statusEl.textContent = '';
+        statusEl.hidden = true;
+    }
+}
+
+async function openMemberProfile(userId, { push = false, fromChat = false } = {}) {
+    if (!isLoggedIn()) {
+        promptLogin();
+        return;
+    }
+
+    if (!userId) return;
+
+    if (userId === currentUserId) {
+        openProfileSettings();
+        return;
+    }
+
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url, avatar_r2_key, about_me, home_location, job, marital_status')
+        .eq('id', userId)
+        .maybeSingle();
+
+    if (error || !data) {
+        showNotify('Profil yüklenemedi.', { title: 'Profil', type: 'error' });
+        return;
+    }
+
+    viewingMemberProfileUserId = userId;
+    viewingMemberProfileUsername = data.username;
+    memberProfileReturnChatId = fromChat && currentActiveChat?.startsWith('User-')
+        ? currentActiveChat
+        : `User-${userId}`;
+
+    renderMemberProfile(data);
+    showMainContentView();
+    document.body.classList.add('member-profile-view');
+    switchView('member-profile-panel', { skipRouteSave: true });
+
+    const slug = usernameToSlug(data.username);
+    if (slug) {
+        const path = `/uye/${slug}/profil`;
+        if (push) pushAppPath(path);
+        else replaceAppPath(path);
+    }
+}
+
+async function returnFromMemberProfile() {
+    const returnChatId = memberProfileReturnChatId;
+    const userId = viewingMemberProfileUserId;
+
+    viewingMemberProfileUserId = null;
+    viewingMemberProfileUsername = null;
+    memberProfileReturnChatId = null;
+    document.body.classList.remove('member-profile-view');
+
+    if (returnChatId?.startsWith('User-')) {
+        await openDmByUserId(returnChatId.replace('User-', ''));
+        return;
+    }
+
+    if (userId) {
+        await openDmByUserId(userId);
+        return;
+    }
+
+    await showChatListHome();
+}
+
+function handleTopbarChatTitleClick() {
+    if (document.getElementById('member-profile-panel')?.classList.contains('active')) {
+        void returnFromMemberProfile();
+        return;
+    }
+
+    if (!currentActiveChat?.startsWith('User-')) return;
+
+    const userId = currentActiveChat.replace('User-', '');
+    void openMemberProfile(userId, { push: true, fromChat: true });
+}
+
+function initMemberProfileControls() {
+    document.getElementById('memberProfileMessageBtn')?.addEventListener('click', () => {
+        void returnFromMemberProfile();
+    });
 }
 
 function openCloudAdminPanel() {
     openCloudPanel();
+}
+
+function getProfileShareUsername() {
+    return currentMyUsername || sanitizeText(document.getElementById('usernameInput')?.value, 24);
+}
+
+function buildProfileShareUrl(username) {
+    const slug = usernameToSlug(username);
+    if (!slug) return null;
+    return `${window.location.origin}/uye/${slug}`;
+}
+
+function updateProfileShareLink() {
+    const linkEl = document.getElementById('profileShareLink');
+    if (!linkEl) return;
+
+    const username = getProfileShareUsername();
+    const url = buildProfileShareUrl(username);
+
+    if (!url) {
+        linkEl.textContent = '—';
+        linkEl.disabled = true;
+        linkEl.removeAttribute('title');
+        return;
+    }
+
+    linkEl.textContent = url;
+    linkEl.title = url;
+    linkEl.disabled = false;
+}
+
+async function copyProfileShareUrl() {
+    if (!isLoggedIn()) {
+        promptLogin();
+        return;
+    }
+
+    const url = buildProfileShareUrl(getProfileShareUsername());
+    if (!url) {
+        showNotify('Profil linki oluşturulamadı. Önce geçerli bir rumuz kaydedin.', { title: 'Kopyala', type: 'warning' });
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(url);
+        showNotify('Profil linki panoya kopyalandı.', { title: 'Kopyala', type: 'success' });
+    } catch {
+        showNotify('Kopyalama başarısız oldu.', { title: 'Kopyala', type: 'error' });
+    }
+}
+
+async function shareProfile() {
+    if (!isLoggedIn()) {
+        promptLogin();
+        return;
+    }
+
+    const url = buildProfileShareUrl(getProfileShareUsername());
+    if (!url) {
+        showNotify('Profil linki oluşturulamadı. Önce geçerli bir rumuz kaydedin.', { title: 'Paylaş', type: 'warning' });
+        return;
+    }
+
+    const shareData = { title: 'Woxifly', url };
+
+    if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {
+        try {
+            await navigator.share(shareData);
+            return;
+        } catch (err) {
+            if (err.name === 'AbortError') return;
+        }
+    }
+
+    await copyProfileShareUrl();
+}
+
+function initProfileShare() {
+    document.getElementById('profileShareLink')?.addEventListener('click', () => {
+        void copyProfileShareUrl();
+    });
+    document.getElementById('profileShareBtn')?.addEventListener('click', () => {
+        void shareProfile();
+    });
+    document.getElementById('usernameInput')?.addEventListener('input', updateProfileShareLink);
 }
 
 function initProfileAvatar() {
@@ -520,8 +787,8 @@ function showMainContentView() {
     closeSidebar();
 }
 
-window.switchView = function (panelId) {
-    if ((panelId === 'profile-panel' || panelId === 'bulut-panel') && !isLoggedIn()) {
+window.switchView = function (panelId, { skipRouteSave = false } = {}) {
+    if ((panelId === 'profile-panel' || panelId === 'bulut-panel' || panelId === 'member-profile-panel') && !isLoggedIn()) {
         promptLogin();
         return;
     }
@@ -531,8 +798,12 @@ window.switchView = function (panelId) {
         return;
     }
 
-    if (panelId === 'profile-panel' || panelId === 'bulut-panel') {
+    if (panelId === 'profile-panel' || panelId === 'bulut-panel' || panelId === 'member-profile-panel') {
         showMainContentView();
+    }
+
+    if (panelId !== 'member-profile-panel') {
+        document.body.classList.remove('member-profile-view');
     }
 
     document.querySelectorAll('.view-panel').forEach((p) => p.classList.remove('active'));
@@ -550,6 +821,7 @@ window.switchView = function (panelId) {
         updatePushStatusUI();
         ensureHmProfileControls();
         initPasswordVisibilityToggles(document.getElementById('hmPinGroup'));
+        updateProfileShareLink();
     }
     closeTopbarMenus();
     closeNotificationDropdown();
@@ -557,7 +829,7 @@ window.switchView = function (panelId) {
         exitSelectionMode(document.getElementById('messageContainer'));
         updateSelectionBarUi(0);
     }
-    saveAppRoute();
+    if (!skipRouteSave) saveAppRoute();
 };
 
 window.checkEnter = function (event) {
@@ -624,7 +896,7 @@ async function showChatListHome() {
 async function loadProfile() {
     const { data, error } = await supabase
         .from('profiles')
-        .select('username, avatar_url, avatar_r2_key')
+        .select('username, avatar_url, avatar_r2_key, about_me, home_location, job, marital_status')
         .eq('id', currentUserId)
         .single();
 
@@ -639,13 +911,16 @@ async function loadProfile() {
         currentMyUsername = 'Kullanıcı';
         currentMyAvatarUrl = null;
         currentMyAvatarR2Key = null;
+        applyProfileDetailFields({});
     } else {
         currentMyUsername = data.username;
         currentMyAvatarUrl = data.avatar_url || null;
         currentMyAvatarR2Key = data.avatar_r2_key || null;
+        applyProfileDetailFields(data);
     }
 
     document.getElementById('usernameInput').value = currentMyUsername;
+    updateProfileShareLink();
 
     refreshAvatarDisplays();
     refreshTopbarMenu();
@@ -680,9 +955,21 @@ async function saveProfile() {
         return;
     }
 
+    const profileDetails = readProfileDetailFields();
+    const aboutText = sanitizeText(profileDetails.aboutRaw, 160);
+    const aboutError = validateProfileAbout(aboutText);
+    if (aboutError) {
+        showNotify(aboutError, { title: 'Hakkımda', type: 'warning' });
+        return;
+    }
+
     const { error } = await supabase.from('profiles').update({
         username: newName,
         is_visible: false,
+        about_me: aboutText || null,
+        home_location: profileDetails.home_location,
+        job: profileDetails.job,
+        marital_status: profileDetails.marital_status,
         updated_at: new Date().toISOString()
     }).eq('id', currentUserId);
 
@@ -776,7 +1063,8 @@ function initMediaComposer() {
         isLoggedIn,
         promptLogin,
         showNotify,
-        onMediaMessage: handleMediaMessage
+        onMediaMessage: handleMediaMessage,
+        onMediaMessageBatch: handleMediaMessageBatch
     });
 
     const voiceBtn = document.getElementById('voiceBtn');
@@ -901,6 +1189,27 @@ async function handleMediaMessage(file, kind) {
     }
 
     await stageComposerMedia(file, kind);
+}
+
+async function handleMediaMessageBatch(files) {
+    if (!isLoggedIn()) {
+        promptLogin();
+        return;
+    }
+
+    await stageComposerMediaBatch(files);
+}
+
+function getPendingMediaItems() {
+    return pendingComposerMedia?.items || [];
+}
+
+function getPendingMediaAggregateState() {
+    const items = getPendingMediaItems();
+    if (!items.length) return 'idle';
+    if (items.some((item) => item.uploadState === 'failed')) return 'failed';
+    if (items.some((item) => item.uploadState === 'uploading' || item.uploadState === 'idle')) return 'uploading';
+    return 'ready';
 }
 
 function clearMessagePlaceholders(container = document.getElementById('messageContainer')) {
@@ -1442,22 +1751,41 @@ async function dispatchPendingComposerMedia(caption = '') {
     const quote = getPendingQuote();
     clearPendingQuote();
 
+    const item = ready.items[0];
     await dispatchOutgoingMessage({
         body: sanitizeText(caption, 2000),
-        contentType: ready.kind,
-        mediaUrl: ready.url,
-        r2Key: ready.r2Key,
+        contentType: item.kind,
+        mediaUrl: item.url,
+        r2Key: item.r2Key,
         quote
     });
 
     clearPendingComposerMedia();
 }
 
+async function dispatchPendingComposerMediaBatch(body = '', quote = null) {
+    const ready = await ensurePendingMediaReady();
+    const caption = sanitizeText(body, 2000);
+
+    for (let i = 0; i < ready.items.length; i += 1) {
+        const item = ready.items[i];
+        await dispatchOutgoingMessage({
+            body: i === 0 ? caption : '',
+            contentType: item.kind,
+            mediaUrl: item.url,
+            r2Key: item.r2Key,
+            quote: i === 0 ? quote : null
+        });
+    }
+
+    clearPendingComposerMedia();
+}
+
 function clearPendingComposerMedia() {
     closeMediaSendModal();
-    if (pendingComposerMedia?.previewUrl) {
-        URL.revokeObjectURL(pendingComposerMedia.previewUrl);
-    }
+    getPendingMediaItems().forEach((item) => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    });
     pendingComposerMedia = null;
     const slot = document.getElementById('mediaComposerSlot');
     if (slot) slot.replaceChildren();
@@ -1469,8 +1797,9 @@ function clearPendingComposerMedia() {
     }
 }
 
-function mediaComposerLabel(kind, uploadState) {
-    const base = kind === 'image' ? '📷 Görsel'
+function mediaComposerLabel(kind, uploadState, count = 1) {
+    const base = kind === 'image'
+        ? (count > 1 ? `📷 ${count} görsel` : '📷 Görsel')
         : kind === 'video' ? '🎬 Video'
             : '🎤 Ses kaydı';
     if (uploadState === 'uploading') return `${base} · yükleniyor…`;
@@ -1485,7 +1814,8 @@ function renderMediaComposerBar() {
     slot.replaceChildren();
     if (!pendingComposerMedia || usesMediaSendModal(pendingComposerMedia.kind)) return;
 
-    const { kind, previewUrl, uploadState } = pendingComposerMedia;
+    const { kind, items } = pendingComposerMedia;
+    const uploadState = getPendingMediaAggregateState();
 
     const bar = document.createElement('div');
     bar.className = 'quote-composer-bar';
@@ -1499,12 +1829,18 @@ function renderMediaComposerBar() {
     content.style.alignItems = 'center';
     content.style.gap = '8px';
 
-    if (kind === 'image' && previewUrl) {
-        const thumb = document.createElement('img');
-        thumb.className = 'media-composer-thumb';
-        thumb.src = previewUrl;
-        thumb.alt = '';
-        content.appendChild(thumb);
+    if (kind === 'image') {
+        const thumbs = document.createElement('div');
+        thumbs.className = 'media-composer-thumbs';
+        items.forEach((item) => {
+            if (!item.previewUrl) return;
+            const thumb = document.createElement('img');
+            thumb.className = 'media-composer-thumb';
+            thumb.src = item.previewUrl;
+            thumb.alt = '';
+            thumbs.appendChild(thumb);
+        });
+        content.appendChild(thumbs);
     } else if (kind === 'video') {
         const thumb = document.createElement('div');
         thumb.className = 'media-composer-thumb media-composer-thumb--icon';
@@ -1522,7 +1858,7 @@ function renderMediaComposerBar() {
 
     const title = document.createElement('div');
     title.className = 'quote-composer-preview';
-    title.textContent = mediaComposerLabel(kind, uploadState);
+    title.textContent = mediaComposerLabel(kind, uploadState, items.length);
 
     textWrap.appendChild(title);
     content.appendChild(textWrap);
@@ -1538,40 +1874,41 @@ function renderMediaComposerBar() {
     slot.appendChild(bar);
 }
 
-async function startPendingMediaUpload() {
-    if (!pendingComposerMedia || pendingComposerMedia.uploadState === 'ready') return;
-    if (pendingComposerMedia.uploadPromise) return pendingComposerMedia.uploadPromise;
-
-    const { file, kind } = pendingComposerMedia;
-    pendingComposerMedia.uploadState = 'uploading';
-    renderMediaComposerBar();
-    if (usesMediaSendModal(kind)) {
-        setMediaSendUploadState('uploading');
-    }
-
+function setUploadStatusBar(active) {
     const bar = document.getElementById('uploadStatus');
-    if (bar) {
-        bar.hidden = false;
-        bar.classList.add('is-active');
-        bar.textContent = 'Medya yükleniyor...';
-    }
+    if (!bar) return;
+    bar.hidden = !active;
+    bar.classList.toggle('is-active', active);
+    bar.textContent = active ? 'Medya yükleniyor...' : '';
+}
 
-    pendingComposerMedia.uploadPromise = uploadMediaFile(file, kind)
+async function uploadPendingMediaItem(item) {
+    if (item.uploadState === 'ready') return;
+    if (item.uploadPromise) return item.uploadPromise;
+
+    item.uploadState = 'uploading';
+    renderMediaComposerBar();
+    if (pendingComposerMedia && usesMediaSendModal(pendingComposerMedia.kind)) {
+        setMediaSendUploadState(getPendingMediaAggregateState());
+    }
+    setUploadStatusBar(true);
+
+    item.uploadPromise = uploadMediaFile(item.file, item.kind)
         .then((result) => {
-            if (!pendingComposerMedia) return result;
-            pendingComposerMedia.url = result.url;
-            pendingComposerMedia.r2Key = result.r2Key;
-            pendingComposerMedia.kind = result.kind;
-            pendingComposerMedia.uploadState = 'ready';
+            if (!pendingComposerMedia?.items?.includes(item)) return result;
+            item.url = result.url;
+            item.r2Key = result.r2Key;
+            item.kind = result.kind;
+            item.uploadState = 'ready';
             renderMediaComposerBar();
-            if (usesMediaSendModal(pendingComposerMedia.kind)) {
-                setMediaSendUploadState('ready');
+            if (pendingComposerMedia && usesMediaSendModal(pendingComposerMedia.kind)) {
+                setMediaSendUploadState(getPendingMediaAggregateState());
             }
             return result;
         })
         .catch((err) => {
-            if (pendingComposerMedia) {
-                pendingComposerMedia.uploadState = 'failed';
+            if (pendingComposerMedia?.items?.includes(item)) {
+                item.uploadState = 'failed';
                 renderMediaComposerBar();
                 if (usesMediaSendModal(pendingComposerMedia.kind)) {
                     setMediaSendUploadState('failed');
@@ -1580,34 +1917,55 @@ async function startPendingMediaUpload() {
             throw err;
         })
         .finally(() => {
-            const statusBar = document.getElementById('uploadStatus');
-            if (statusBar) {
-                statusBar.hidden = true;
-                statusBar.classList.remove('is-active');
-                statusBar.textContent = '';
-            }
-            if (pendingComposerMedia) {
-                pendingComposerMedia.uploadPromise = null;
+            item.uploadPromise = null;
+            if (getPendingMediaAggregateState() !== 'uploading') {
+                setUploadStatusBar(false);
             }
         });
 
-    return pendingComposerMedia.uploadPromise;
+    return item.uploadPromise;
+}
+
+async function startPendingMediaUpload() {
+    if (!pendingComposerMedia) return;
+    await Promise.all(getPendingMediaItems().map((item) => uploadPendingMediaItem(item)));
 }
 
 async function ensurePendingMediaReady() {
-    if (!pendingComposerMedia) return null;
-    if (pendingComposerMedia.uploadState === 'ready') {
-        return pendingComposerMedia;
-    }
-    if (pendingComposerMedia.uploadState === 'failed') {
-        pendingComposerMedia.uploadState = 'idle';
-        pendingComposerMedia.uploadPromise = null;
-    }
-    await startPendingMediaUpload();
-    if (pendingComposerMedia?.uploadState !== 'ready') {
+    if (!pendingComposerMedia) {
         throw new Error('Medya yüklenemedi. Tekrar deneyin.');
     }
+
+    const items = getPendingMediaItems();
+    items.forEach((item) => {
+        if (item.uploadState === 'failed') {
+            item.uploadState = 'idle';
+            item.uploadPromise = null;
+        }
+    });
+
+    await startPendingMediaUpload();
+
+    if (items.some((item) => item.uploadState === 'failed')) {
+        throw new Error('Medya yüklenemedi. Tekrar deneyin.');
+    }
+    if (items.some((item) => item.uploadState !== 'ready')) {
+        throw new Error('Medya yüklenemedi. Tekrar deneyin.');
+    }
+
     return pendingComposerMedia;
+}
+
+function createPendingMediaItem(file, kind, previewUrl) {
+    return {
+        file,
+        kind,
+        previewUrl,
+        url: null,
+        r2Key: null,
+        uploadState: 'idle',
+        uploadPromise: null
+    };
 }
 
 async function stageComposerMedia(file, kind) {
@@ -1631,13 +1989,8 @@ async function stageComposerMedia(file, kind) {
         : null;
 
     pendingComposerMedia = {
-        file: uploadFile,
         kind,
-        previewUrl,
-        url: null,
-        r2Key: null,
-        uploadState: 'idle',
-        uploadPromise: null
+        items: [createPendingMediaItem(uploadFile, kind, previewUrl)]
     };
 
     const input = document.getElementById('messageInput');
@@ -1650,6 +2003,44 @@ async function stageComposerMedia(file, kind) {
         renderMediaComposerBar();
         input?.focus();
     }
+
+    startPendingMediaUpload().catch(() => {
+        showNotify('Medya yüklenemedi.', { title: 'Yükleme hatası', type: 'error' });
+    });
+}
+
+async function stageComposerMediaBatch(files) {
+    const items = [];
+
+    for (const file of files) {
+        try {
+            const compressed = await compressImageForChat(file);
+            items.push(createPendingMediaItem(
+                compressed,
+                'image',
+                URL.createObjectURL(compressed)
+            ));
+        } catch (err) {
+            items.forEach((item) => {
+                if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+            });
+            showNotify(err.message || 'Görsel işlenemedi.', {
+                title: 'Yükleme hatası',
+                type: 'error'
+            });
+            return;
+        }
+    }
+
+    clearPendingComposerMedia();
+
+    pendingComposerMedia = {
+        kind: 'image',
+        items
+    };
+
+    renderMediaComposerBar();
+    document.getElementById('messageInput')?.focus();
 
     startPendingMediaUpload().catch(() => {
         showNotify('Medya yüklenemedi.', { title: 'Yükleme hatası', type: 'error' });
@@ -1750,6 +2141,11 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
         return;
     }
 
+    viewingMemberProfileUserId = null;
+    viewingMemberProfileUsername = null;
+    memberProfileReturnChatId = null;
+    document.body.classList.remove('member-profile-view');
+
     showChatConversationUi();
     messageHistoryLoadId += 1;
     clearMessageContainer();
@@ -1818,19 +2214,9 @@ async function sendMessage() {
 
     try {
         if (hasPendingMedia) {
-            const ready = await ensurePendingMediaReady();
             clearPendingQuote();
             if (input) input.value = '';
-
-            await dispatchOutgoingMessage({
-                body,
-                contentType: ready.kind,
-                mediaUrl: ready.url,
-                r2Key: ready.r2Key,
-                quote
-            });
-
-            clearPendingComposerMedia();
+            await dispatchPendingComposerMediaBatch(body, quote);
             return;
         }
 
@@ -2359,6 +2745,9 @@ async function initDashboard() {
         showChatListHome();
     });
     runInitStep('initProfileAvatar', initProfileAvatar);
+    runInitStep('initProfileDetails', initProfileDetailSelects);
+    runInitStep('initProfileShare', initProfileShare);
+    runInitStep('initMemberProfileControls', initMemberProfileControls);
     runInitStep('initPushControls', initPushControls);
     runInitStep('initNotificationCenter', () => initNotificationCenter({
         onNavigate: (route) => {
@@ -2447,19 +2836,26 @@ function triggerPushForMessage(conversationId) {
 }
 
 function initPushControls() {
-    const pushBtn = document.getElementById('pushToggleBtn');
+    const onRadio = document.getElementById('pushRadioOn');
+    const offRadio = document.getElementById('pushRadioOff');
+    let busy = false;
 
-    pushBtn?.addEventListener('click', async () => {
+    async function applyPushPreference(enable) {
         if (!isLoggedIn()) {
             promptLogin();
+            await updatePushStatusUI();
             return;
         }
+        if (busy) return;
 
+        const before = await getPushSubscriptionState();
+        if (enable === before.pushEnabled) return;
+
+        busy = true;
         try {
-            const before = await getPushSubscriptionState();
-            await togglePushNotifications();
-            const after = await getPushSubscriptionState();
-            updatePushStatusUI();
+            const after = enable
+                ? await enablePushNotifications()
+                : await disablePushNotifications();
 
             if (after.pushEnabled && !before.pushEnabled) {
                 showNotify(
@@ -2476,22 +2872,33 @@ function initPushControls() {
                 title: 'Bildirimler',
                 type: 'error'
             });
+        } finally {
+            busy = false;
+            await updatePushStatusUI();
         }
+    }
+
+    onRadio?.addEventListener('change', () => {
+        if (onRadio.checked) void applyPushPreference(true);
+    });
+    offRadio?.addEventListener('change', () => {
+        if (offRadio.checked) void applyPushPreference(false);
     });
 }
 
 async function updatePushStatusUI() {
-    const statusEl = document.getElementById('pushStatusText');
-    const btn = document.getElementById('pushToggleBtn');
-    if (!statusEl || !btn) return;
+    const onRadio = document.getElementById('pushRadioOn');
+    const offRadio = document.getElementById('pushRadioOff');
+    if (!onRadio || !offRadio) return;
 
     const state = await getPushSubscriptionState();
-    const ui = describePushStatus(state);
 
-    statusEl.textContent = ui.text;
-    statusEl.className = ui.className;
-    btn.textContent = ui.buttonText;
-    btn.disabled = ui.disabled;
+    onRadio.checked = state.pushEnabled;
+    offRadio.checked = !state.pushEnabled;
+
+    const unsupported = !isPushSupported();
+    onRadio.disabled = unsupported || (state.permission === 'denied' && !state.pushEnabled);
+    offRadio.disabled = unsupported;
 }
 
 async function openChatFromNotification(route) {
@@ -2533,7 +2940,8 @@ configureTopbar({
     onCloudPanel: openCloudAdminPanel,
     onLogout: handleLogout,
     onMenuClick: () => window.toggleSidebar?.(),
-    onProfileMenuOpen: () => refreshCloudAdminStatus()
+    onProfileMenuOpen: () => refreshCloudAdminStatus(),
+    onChatTitleClick: handleTopbarChatTitleClick
 });
 
 refreshTopbarMenu();

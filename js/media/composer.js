@@ -2,6 +2,8 @@ import { uploadFile } from './upload.js';
 import { kindFromFile } from './urls.js';
 import { updateMediaBlock } from './render.js';
 
+const MAX_BATCH_IMAGES = 3;
+
 function setUploadBar(active) {
     const area = document.getElementById('messageInputArea');
     const bar = document.getElementById('uploadStatus');
@@ -73,6 +75,34 @@ async function deliverPickedMedia(file, { showNotify, onMediaMessage }) {
     await onMediaMessage(file, kind);
 }
 
+async function deliverPickedMediaBatch(files, { showNotify, onMediaMessageBatch }) {
+    const images = files.filter((file) => kindFromFile(file) === 'image');
+    if (!images.length) {
+        showNotify('Yalnızca görsel seçebilirsiniz.', {
+            title: 'Desteklenmeyen dosya',
+            type: 'warning'
+        });
+        return;
+    }
+
+    if (images.length !== files.length) {
+        showNotify('Aynı anda yalnızca görsel gönderebilirsiniz.', {
+            title: 'Desteklenmeyen dosya',
+            type: 'warning'
+        });
+        return;
+    }
+
+    if (images.length > MAX_BATCH_IMAGES) {
+        showNotify(`En fazla ${MAX_BATCH_IMAGES} görsel seçebilirsiniz.`, {
+            title: 'Çok fazla görsel',
+            type: 'warning'
+        });
+    }
+
+    await onMediaMessageBatch(images.slice(0, MAX_BATCH_IMAGES));
+}
+
 export async function uploadMediaFile(file, kind) {
     const result = await uploadFile(file, kind);
     return {
@@ -123,14 +153,15 @@ export function initComposer({
     isLoggedIn,
     promptLogin,
     showNotify,
-    onMediaMessage
+    onMediaMessage,
+    onMediaMessageBatch
 }) {
     const fileInput = document.getElementById('fileInput');
     const attachBtn = document.getElementById('attachBtn');
     const voiceBtn = document.getElementById('voiceBtn');
     const messageInput = document.getElementById('messageInput');
 
-    const mediaContext = { showNotify, onMediaMessage };
+    const mediaContext = { showNotify, onMediaMessage, onMediaMessageBatch };
 
     attachBtn?.addEventListener('click', () => {
         if (!isLoggedIn()) {
@@ -141,12 +172,16 @@ export function initComposer({
     });
 
     fileInput?.addEventListener('change', async () => {
-        const file = fileInput.files?.[0];
+        const files = Array.from(fileInput.files || []);
         fileInput.value = '';
-        if (!file) return;
+        if (!files.length) return;
 
         try {
-            await deliverPickedMedia(file, mediaContext);
+            if (files.length === 1) {
+                await deliverPickedMedia(files[0], mediaContext);
+                return;
+            }
+            await deliverPickedMediaBatch(files, mediaContext);
         } catch (err) {
             showNotify(err.message || 'Medya gönderilemedi.', {
                 title: 'Yükleme hatası',

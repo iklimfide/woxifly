@@ -16,6 +16,9 @@ body.chats-home-view .app-topbar__inner{position:relative}
 body.chats-home-view #headerTitleChat:not([hidden]){position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);flex:none;width:max-content;max-width:calc(100% - 112px);justify-content:center}
 body.chats-home-view #activeChatAvatar{display:none!important}
 body.chats-home-view .app-topbar__chat-name{font-size:1.05rem;font-weight:600}
+body.chat-open-view #headerTitleChat{cursor:pointer}
+body.chat-open-view #headerTitleChat:active{opacity:.92}
+body.member-profile-view #headerTitleChat{cursor:pointer}
 .app-topbar__title{display:flex;align-items:center;min-width:0;flex:1;gap:10px;overflow:hidden}
 .app-topbar__title[hidden]{display:none!important}
 .app-topbar__avatar{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.35);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;flex-shrink:0;overflow:hidden}
@@ -49,7 +52,8 @@ const actions = {
     onCloudPanel: () => {},
     onLogout: () => {},
     onMenuClick: () => {},
-    onProfileMenuOpen: null
+    onProfileMenuOpen: null,
+    onChatTitleClick: null
 };
 
 let mounted = false;
@@ -122,6 +126,11 @@ function bindTopbarEvents() {
     qs('headerProfilePic')?.addEventListener('click', (event) => {
         event.stopPropagation();
         toggleProfileMenu();
+    });
+
+    qs('headerTitleChat')?.addEventListener('click', () => {
+        if (document.body.classList.contains('chats-home-view')) return;
+        actions.onChatTitleClick?.();
     });
 
     qs('profileDropdown')?.addEventListener('click', (event) => {
