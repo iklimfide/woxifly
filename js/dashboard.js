@@ -568,28 +568,18 @@ window.saveProfile = saveProfile;
 window.openChat = openChat;
 window.sendMessage = sendMessage;
 
-function hasDmChatItems() {
-    const list = document.getElementById('myActiveChatsList');
-    if (!list) return false;
-    return !!list.querySelector('.chat-item');
-}
-
 function updateHeaderForChatHome() {
     const statusEl = document.getElementById('activeChatStatus');
-    const hasDms = hasDmChatItems();
+    const nameEl = document.getElementById('activeChatName');
+    const avatarEl = document.getElementById('activeChatAvatar');
 
-    if (hasDms) {
-        document.getElementById('activeChatName').textContent = 'Sohbetler';
-    } else {
-        document.getElementById('activeChatName').textContent = 'Woxifly';
-    }
+    if (nameEl) nameEl.textContent = 'Woxifly';
+    if (avatarEl) avatarEl.hidden = true;
 
     if (statusEl) {
         statusEl.textContent = '';
         statusEl.hidden = true;
     }
-
-    document.getElementById('activeChatAvatar').textContent = hasDms ? 'S' : 'W';
 }
 
 function showChatConversationUi() {
@@ -1776,6 +1766,7 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
     document.getElementById('activeChatName').textContent = title;
     const statusEl = document.getElementById('activeChatStatus');
     const activeChatAvatar = document.getElementById('activeChatAvatar');
+    if (activeChatAvatar) activeChatAvatar.hidden = false;
 
     statusEl.textContent = '';
     statusEl.style.display = 'none';

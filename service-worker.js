@@ -1,10 +1,12 @@
 /* Woxifly — hafif PWA service worker (push + önbellek) */
 
-const CACHE_NAME = 'woxifly-shell-v10';
+const CACHE_NAME = 'woxifly-shell-v11';
 const SHELL_URLS = [
     '/',
     '/index.html',
     '/manifest.json',
+    '/manifest-calc.json',
+    '/js/pwa-brand-sync.js',
     '/icons/icon-192.png',
     '/icons/icon-512.png',
     '/icons/calc-icon-192.png',

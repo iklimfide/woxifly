@@ -11,7 +11,11 @@ const TOPBAR_CSS = `
 .app-topbar__end{display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto}
 .app-topbar__menu-btn{width:40px;height:40px;border:none;border-radius:8px;background:rgba(255,255,255,.18);color:#fff;font-size:1.2rem;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .app-topbar__menu-btn:active{transform:scale(.96)}
-body.chats-home-view .app-topbar__menu-btn{visibility:hidden;pointer-events:none}
+body.chats-home-view .app-topbar__menu-btn{display:none!important}
+body.chats-home-view .app-topbar__inner{position:relative}
+body.chats-home-view #headerTitleChat:not([hidden]){position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);flex:none;width:max-content;max-width:calc(100% - 112px);justify-content:center}
+body.chats-home-view #activeChatAvatar{display:none!important}
+body.chats-home-view .app-topbar__chat-name{font-size:1.05rem;font-weight:600}
 .app-topbar__title{display:flex;align-items:center;min-width:0;flex:1;gap:10px;overflow:hidden}
 .app-topbar__title[hidden]{display:none!important}
 .app-topbar__avatar{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.35);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;flex-shrink:0;overflow:hidden}
@@ -76,7 +80,7 @@ function mountTopbar() {
                 <div class="app-topbar__title" id="headerTitleChat">
                     <div class="app-topbar__avatar" id="activeChatAvatar">W</div>
                     <div class="app-topbar__title-text">
-                        <div class="app-topbar__chat-name" id="activeChatName">Sohbetler</div>
+                        <div class="app-topbar__chat-name" id="activeChatName">Woxifly</div>
                         <div class="app-topbar__chat-status" id="activeChatStatus" hidden></div>
                     </div>
                 </div>

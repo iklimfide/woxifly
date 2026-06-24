@@ -32,5 +32,6 @@ export function applySiteSeo(calculatorMode = false) {
 }
 
 export function initSeo() {
-    applySiteSeo(false);
+    const calculatorMode = localStorage.getItem('hm_perde') === 'true';
+    applySiteSeo(calculatorMode);
 }

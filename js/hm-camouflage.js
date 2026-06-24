@@ -1,15 +1,8 @@
 import { applySiteSeo } from './seo.js';
 import {
-    CALC_TITLE,
-    CALC_SHORT_NAME,
-    CALC_DESCRIPTION,
-    SITE_NAME,
-    SITE_DESCRIPTION,
     APP_ICON_192,
-    APP_ICON_512,
     APP_FAVICON,
     CALC_ICON_192,
-    CALC_ICON_512,
     CALC_FAVICON
 } from '../shared/seo-config.js';
 
@@ -57,40 +50,21 @@ export function updatePageIcons(isCalculatorMode) {
 }
 
 export function updatePWAManifest(isCalculatorMode) {
-    const manifest = {
-        name: isCalculatorMode ? CALC_TITLE : SITE_NAME,
-        short_name: isCalculatorMode ? CALC_SHORT_NAME : SITE_NAME,
-        description: isCalculatorMode ? CALC_DESCRIPTION : SITE_DESCRIPTION,
-        start_url: '/',
-        display: 'standalone',
-        background_color: isCalculatorMode ? '#000000' : '#fdfbf7',
-        theme_color: isCalculatorMode ? '#000000' : '#2077c5',
-        icons: [
-            {
-                src: isCalculatorMode ? CALC_ICON_192 : APP_ICON_192,
-                sizes: '192x192',
-                type: 'image/png'
-            },
-            {
-                src: isCalculatorMode ? CALC_ICON_512 : APP_ICON_512,
-                sizes: '512x512',
-                type: 'image/png'
-            }
-        ]
-    };
-
-    let manifestLink = document.querySelector('link[rel="manifest"]');
-    if (manifestLink) {
-        manifestLink.setAttribute('href', 'data:application/json;base64,' + btoa(JSON.stringify(manifest)));
+    if (typeof window.__applyPwaBrand === 'function') {
+        window.__applyPwaBrand(isCalculatorMode);
+    } else {
+        updatePageIcons(isCalculatorMode);
+        const manifestLink = document.querySelector('link[rel="manifest"]');
+        if (manifestLink) {
+            manifestLink.href = isCalculatorMode ? '/manifest-calc.json' : '/manifest.json';
+        }
+        const themeColor = document.querySelector('meta[name="theme-color"]');
+        if (themeColor) {
+            themeColor.setAttribute('content', isCalculatorMode ? '#000000' : '#2077c5');
+        }
     }
 
     applySiteSeo(isCalculatorMode);
-    updatePageIcons(isCalculatorMode);
-
-    const themeColor = document.querySelector('meta[name="theme-color"]');
-    if (themeColor) {
-        themeColor.setAttribute('content', isCalculatorMode ? '#000000' : '#2077c5');
-    }
 }
 
 export function saveHmSettings(enabled, pin) {
