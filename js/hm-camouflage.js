@@ -146,11 +146,22 @@ function resetCalc() {
 }
 
 function inputDigit(digit) {
+    const pinEntryMode = calcState.operator === null && calcState.stored === null;
+
     if (calcState.fresh) {
         calcState.display = digit;
         calcState.fresh = false;
+    } else if (pinEntryMode) {
+        // PIN girişi: 0000 gibi baştaki sıfırlara izin ver
+        if (calcState.display === '0' && digit !== '0') {
+            calcState.display = digit;
+        } else if (calcState.display.replace(/^-/, '').length < 8) {
+            calcState.display += digit;
+        }
+    } else if (calcState.display === '0') {
+        calcState.display = digit;
     } else {
-        calcState.display = calcState.display === '0' ? digit : calcState.display + digit;
+        calcState.display += digit;
     }
     updateCalcDisplay();
 }
