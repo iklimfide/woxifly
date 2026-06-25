@@ -1,12 +1,15 @@
 import { supabase } from './supabase-client.js';
 import { getLocationCoords, DEFAULT_LOCATION } from './config.js';
 import { sanitizeText, isValidUsername, isValidEmail, setButtonLoading, showAuthError } from './utils.js';
-
+import { openWelcomeModal } from './welcome-modal.js';
+import { showToast } from './notify-modal.js';
 let onAuthSuccess = null;
 let modalElements = null;
+let getIsLoggedIn = () => false;
 
-export function initAuthModal(successCallback) {
+export function initAuthModal(successCallback, { isLoggedIn } = {}) {
     onAuthSuccess = successCallback;
+    if (isLoggedIn) getIsLoggedIn = isLoggedIn;
     modalElements = {
         overlay: document.getElementById('authModalOverlay'),
         modal: document.getElementById('authModal'),
@@ -24,6 +27,22 @@ export function initAuthModal(successCallback) {
 
     modalElements.loginForm.addEventListener('submit', handleLoginSubmit);
     modalElements.registerForm.addEventListener('submit', handleRegisterSubmit);
+
+    document.getElementById('authModalCloseBtn')?.addEventListener('click', cancelAuthModal);
+}
+
+export function cancelAuthModal() {
+    if (!modalElements) return;
+
+    closeAuthModal();
+    modalElements.loginForm.reset();
+    modalElements.registerForm.reset();
+    showAuthError(modalElements.loginMessage, '');
+    showAuthError(modalElements.registerMessage, '');
+
+    if (!getIsLoggedIn()) {
+        openWelcomeModal();
+    }
 }
 
 export function openAuthModal(tab = 'login') {
@@ -92,6 +111,7 @@ async function handleLoginSubmit(event) {
         }
 
         if (data.session) {
+            showToast('Giriş başarılı, yönlendiriliyorsunuz.', { type: 'success' });
             await finishAuth();
         }
     } catch {
@@ -147,30 +167,26 @@ async function handleRegisterSubmit(event) {
             return;
         }
 
+        if (!data.user?.id) {
+            showAuthError(registerMessage, 'Kayıt oluşturulamadı.');
+            return;
+        }
+
+        await ensureProfile(data.user.id, username);
+
         if (data.session) {
-            await completeRegistration(data.user.id, username);
-            return;
+            await supabase.auth.signOut();
         }
 
-        const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
-        if (loginError) {
-            showAuthError(registerMessage, translateAuthError(loginError.message));
-            return;
-        }
-
-        if (loginData.session && loginData.user) {
-            await completeRegistration(loginData.user.id, username);
-        }
+        showToast('Kayıt başarılı, giriş ekranına yönlendiriliyorsunuz.', { type: 'success' });
+        registerForm.reset();
+        modalElements.loginForm.email.value = email;
+        switchAuthTab('login');
     } catch {
         showAuthError(registerMessage, 'Kayıt sırasında beklenmeyen bir hata oluştu.');
     } finally {
         setButtonLoading(registerBtn, false, 'Hesap Oluştur');
     }
-}
-
-async function completeRegistration(userId, username) {
-    await ensureProfile(userId, username);
-    await finishAuth();
 }
 
 async function ensureProfile(userId, username) {

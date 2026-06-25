@@ -1,7 +1,7 @@
 import { supabase, getSession } from './supabase-client.js';
 import { initAuthModal, openAuthModal } from './auth-modal.js';
 import { initWelcomeModal, maybeShowWelcomeModal, closeWelcomeModal } from './welcome-modal.js';
-import { initNotifyModal, showNotify, closeNotifyModal } from './notify-modal.js';
+import { initNotifyModal, showNotify, showToast, closeNotifyModal } from './notify-modal.js';
 import { initLinkViewer } from './link-viewer.js';
 import {
     initViewer,
@@ -70,7 +70,6 @@ import {
     getPushSubscriptionState,
     enablePushNotifications,
     disablePushNotifications,
-    notifyPushRecipients,
     syncPushEnabledFromProfile,
     parseNotificationRoute,
     parseNotifyQueryParam,
@@ -589,15 +588,15 @@ async function copyProfileShareUrl() {
 
     const url = buildProfileShareUrl(getProfileShareUsername());
     if (!url) {
-        showNotify('Profil linki oluşturulamadı. Önce geçerli bir rumuz kaydedin.', { title: 'Kopyala', type: 'warning' });
+        showToast('Profil linki oluşturulamadı. Önce geçerli bir rumuz kaydedin.', { type: 'warning' });
         return;
     }
 
     try {
         await navigator.clipboard.writeText(url);
-        showNotify('Profil linki panoya kopyalandı.', { title: 'Kopyala', type: 'success' });
+        showToast('Profil linki panoya kopyalandı.', { type: 'success' });
     } catch {
-        showNotify('Kopyalama başarısız oldu.', { title: 'Kopyala', type: 'error' });
+        showToast('Kopyalama başarısız oldu.', { type: 'error' });
     }
 }
 
@@ -753,7 +752,7 @@ function updateMessageInputState() {
     const input = document.getElementById('messageInput');
     if (!input) return;
     input.placeholder = isLoggedIn()
-        ? 'Mesajınızı yazın veya görsel yapıştırın...'
+        ? 'Mesaj yazın...'
         : 'Mesaj yazmak için giriş yapın...';
 
     input.onfocus = isLoggedIn() ? null : () => {
@@ -1844,8 +1843,6 @@ async function persistMessageAsync({
         if (data?.id && clientId) {
             setMessageDbIdByClientId(clientId, data.id);
         }
-
-        triggerPushForMessage(convId);
     } catch (err) {
         console.error('Mesaj kaydı başarısız:', err);
     }
@@ -2882,7 +2879,7 @@ async function initDashboard() {
         showNotify,
         onAdminStatusChange: () => refreshTopbarMenu()
     }));
-    runInitStep('initAuthModal', () => initAuthModal(refreshSessionState));
+    runInitStep('initAuthModal', () => initAuthModal(refreshSessionState, { isLoggedIn }));
     runInitStep('initWelcomeModal', () => initWelcomeModal({
         isLoggedIn,
         onLogin: promptLogin,
@@ -3004,11 +3001,6 @@ async function initDashboard() {
     syncTopbarMenuIcon();
 }
 
-function triggerPushForMessage(conversationId) {
-    if (!conversationId) return;
-    notifyPushRecipients({ conversationId });
-}
-
 function initPushControls() {
     const onRadio = document.getElementById('pushRadioOn');
     const offRadio = document.getElementById('pushRadioOff');
@@ -3033,11 +3025,7 @@ function initPushControls() {
 
             if (after.pushEnabled && !before.pushEnabled) {
                 showNotify(
-                    after.subscribed
-                        ? 'Bildirimler açıldı. Uygulama kapalıyken de uyarı alırsınız.'
-                        : after.foregroundOnly
-                            ? 'Bildirimler açıldı. Sekme açıkken uyarı alırsınız; arka plan için tarayıcı izni ve sunucu ayarı gerekir.'
-                            : 'Bildirimler açıldı. Tarayıcıdan bildirim izni vermeniz gerekebilir.',
+                    'Bildirimler açıldı. Yeni mesajlar çan ikonunda ve tarayıcı uyarısında görünür.',
                     { title: 'Bildirimler', type: 'info' }
                 );
             } else if (!after.pushEnabled && before.pushEnabled) {

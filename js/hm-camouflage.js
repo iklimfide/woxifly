@@ -49,19 +49,12 @@ export function updatePageIcons(isCalculatorMode) {
     }
 }
 
-export function updatePWAManifest(isCalculatorMode) {
-    if (typeof window.__applyPwaBrand === 'function') {
-        window.__applyPwaBrand(isCalculatorMode);
-    } else {
-        updatePageIcons(isCalculatorMode);
-        const manifestLink = document.querySelector('link[rel="manifest"]');
-        if (manifestLink) {
-            manifestLink.href = isCalculatorMode ? '/manifest-calc.json' : '/manifest.json';
-        }
-        const themeColor = document.querySelector('meta[name="theme-color"]');
-        if (themeColor) {
-            themeColor.setAttribute('content', isCalculatorMode ? '#000000' : '#2077c5');
-        }
+export function updateSiteBranding(isCalculatorMode) {
+    updatePageIcons(isCalculatorMode);
+
+    const themeColor = document.querySelector('meta[name="theme-color"]');
+    if (themeColor) {
+        themeColor.setAttribute('content', isCalculatorMode ? '#000000' : '#2077c5');
     }
 
     applySiteSeo(isCalculatorMode);
@@ -79,7 +72,7 @@ export function saveHmSettings(enabled, pin) {
         hideHmVeil();
     }
 
-    updatePWAManifest(enabled);
+    updateSiteBranding(enabled);
 }
 
 function setPinGroupVisible(visible) {
@@ -351,7 +344,7 @@ export function initHmCamouflage() {
     bindProfileControls();
     bindLeaveGuard();
     syncHmProfileUi();
-    updatePWAManifest(isHmEnabled());
+    updateSiteBranding(isHmEnabled());
 
     if (isHmEnabled()) {
         showHmVeil();

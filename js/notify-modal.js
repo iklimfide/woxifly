@@ -47,3 +47,22 @@ export function closeNotifyModal() {
     elements.modal.classList.remove('open');
     document.body.classList.remove('notify-modal-open');
 }
+
+export function showToast(message, { type = 'info', duration = 3200 } = {}) {
+    const host = document.getElementById('toastHost');
+    if (!host || !message) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast--${type}`;
+    toast.textContent = message;
+    host.appendChild(toast);
+
+    requestAnimationFrame(() => {
+        toast.classList.add('is-visible');
+    });
+
+    window.setTimeout(() => {
+        toast.classList.remove('is-visible');
+        window.setTimeout(() => toast.remove(), 220);
+    }, duration);
+}

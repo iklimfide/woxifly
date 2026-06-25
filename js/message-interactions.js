@@ -1,5 +1,6 @@
 import { formatQuotePreview, formatQuoteAuthorLabel } from './utils.js';
 import { displayMediaUrl } from './media/urls.js';
+import { showToast } from './notify-modal.js';
 
 export const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
@@ -409,15 +410,15 @@ export function extractMessagePayload(messageEl) {
 async function copyMessageText(messageEl) {
     const text = getMessageCopyText(messageEl);
     if (!text) {
-        onShowNotify?.('Kopyalanacak metin bulunamadı.', { title: 'Kopyala', type: 'warning' });
+        showToast('Kopyalanacak metin bulunamadı.', { type: 'warning' });
         return;
     }
 
     try {
         await navigator.clipboard.writeText(text);
-        onShowNotify?.('Panoya kopyalandı.', { title: 'Kopyala', type: 'success' });
+        showToast('Panoya kopyalandı.', { type: 'success' });
     } catch {
-        onShowNotify?.('Kopyalama başarısız oldu.', { title: 'Kopyala', type: 'error' });
+        showToast('Kopyalama başarısız oldu.', { type: 'error' });
     }
 }
 

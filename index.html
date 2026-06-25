@@ -4,11 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#2077c5">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Woxifly">
-    <link rel="manifest" href="/manifest.json">
-    <script src="/js/pwa-brand-sync.js"></script>
     <link rel="icon" href="/favicon.png" type="image/png">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <title>Woxifly</title>
@@ -80,6 +75,7 @@
             --gradient-blue-end: #2077c5;
             --message-out-blue: #d9edff; 
             --accent-color: #2e8add; 
+            --brand-fly-color: #ffd43b;
             --border-color: #e2e8f0;
             --header-h: 60px;
             --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -2233,7 +2229,7 @@
         .welcome-modal-hero {
             background: linear-gradient(135deg, var(--gradient-blue-start), var(--gradient-blue-end));
             color: #ffffff;
-            padding: 44px 24px 36px;
+            padding: 32px 24px 22px;
             text-align: center;
             border-bottom-left-radius: 24px;
             border-bottom-right-radius: 24px;
@@ -2248,7 +2244,20 @@
         }
 
         .welcome-modal-hero h2 span {
-            color: #c4f9da;
+            color: var(--brand-fly-color);
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+        }
+
+        .brand-tld {
+            font-size: 0.52em;
+            font-weight: 600;
+            opacity: 0.88;
+            margin-left: 1px;
+            letter-spacing: 0;
+        }
+
+        .welcome-modal-hero h2 .brand-tld {
+            color: rgba(255, 255, 255, 0.9);
         }
 
         .welcome-modal-tagline {
@@ -2256,18 +2265,8 @@
             font-weight: 600;
             color: #ffffff;
             opacity: 0.98;
-            margin-bottom: 14px;
+            margin-bottom: 0;
             line-height: 1.45;
-        }
-
-        .welcome-modal-badge {
-            display: inline-block;
-            background-color: rgba(255, 255, 255, 0.2);
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            letter-spacing: 0.3px;
         }
 
         .welcome-modal-body {
@@ -2306,6 +2305,16 @@
             margin-bottom: 12px;
             font-size: 2rem;
             line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .welcome-feature-card-icon img {
+            width: 48px;
+            height: 48px;
+            display: block;
+            border-radius: 12px;
         }
 
         .welcome-feature-card h4 {
@@ -2344,66 +2353,32 @@
 
         .welcome-modal-action {
             margin-top: 24px;
-            text-align: center;
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             gap: 10px;
         }
 
-        .welcome-modal-btn--secondary {
-            display: block;
-            width: 100%;
-            min-height: 48px;
-            background: #ffffff;
-            color: var(--accent-color);
-            border: 1.5px solid var(--accent-color);
-            padding: 14px 16px;
-            border-radius: 16px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-
-        .welcome-modal-btn--secondary:active {
-            opacity: 0.92;
-            transform: scale(0.99);
-        }
-
+        .welcome-modal-btn--secondary,
         .welcome-modal-btn--primary {
+            flex: 1;
             display: block;
-            width: 100%;
             min-height: 48px;
             background: linear-gradient(to bottom, var(--gradient-blue-start), var(--gradient-blue-end));
             color: #ffffff;
             border: 1px solid #1a6cb1;
-            padding: 14px 16px;
+            padding: 14px 12px;
             border-radius: 16px;
-            font-size: 1rem;
+            font-size: 0.95rem;
             font-weight: 600;
             cursor: pointer;
             box-shadow: 0 4px 12px rgba(46, 138, 221, 0.2);
+            font-family: inherit;
         }
 
+        .welcome-modal-btn--secondary:active,
         .welcome-modal-btn--primary:active {
             opacity: 0.92;
             transform: scale(0.99);
-        }
-
-        .welcome-modal-login-link {
-            display: inline-block;
-            margin-top: 14px;
-            padding: 8px 4px;
-            border: none;
-            background: none;
-            font-size: 0.88rem;
-            color: var(--text-muted);
-            font-weight: 500;
-            cursor: pointer;
-        }
-
-        .welcome-modal-login-link strong {
-            color: var(--accent-color);
-            font-weight: 600;
         }
 
         /* --- GİRİŞ / KAYIT MODAL --- */
@@ -2449,7 +2424,8 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 14px 16px;
+            position: relative;
+            padding: 14px 44px;
             background: linear-gradient(to bottom, var(--gradient-blue-start), var(--gradient-blue-end));
             color: white;
             flex-shrink: 0;
@@ -2460,7 +2436,38 @@
             font-weight: 700;
         }
 
-        .auth-modal-header h3 span { color: #c4f9da; }
+        .auth-modal-header h3 span {
+            color: var(--brand-fly-color);
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+        }
+
+        .auth-modal-header h3 .brand-tld {
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .auth-modal-close {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 36px;
+            height: 36px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.18);
+            color: #ffffff;
+            font-size: 1.4rem;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: inherit;
+        }
+
+        .auth-modal-close:active {
+            background: rgba(255, 255, 255, 0.28);
+        }
 
         .auth-modal-body {
             overflow-y: auto;
@@ -2665,6 +2672,56 @@
         }
 
         .notify-modal[data-type="error"] .notify-modal-btn {
+            background: linear-gradient(to bottom, #e53e3e, #c53030);
+        }
+
+        .toast-host {
+            position: absolute;
+            inset: 0;
+            z-index: 900;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            pointer-events: none;
+            padding: 24px;
+        }
+
+        .toast {
+            width: min(100%, 320px);
+            padding: 14px 18px;
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.92);
+            color: #ffffff;
+            font-size: 0.9rem;
+            font-weight: 600;
+            line-height: 1.45;
+            text-align: center;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.28);
+            opacity: 0;
+            transform: scale(0.94);
+            transition: opacity 0.22s ease, transform 0.22s ease;
+        }
+
+        .toast.is-visible {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .toast--success {
+            background: linear-gradient(to bottom, #38a169, #2f855a);
+        }
+
+        .toast--info {
+            background: linear-gradient(to bottom, var(--gradient-blue-start), var(--gradient-blue-end));
+        }
+
+        .toast--warning {
+            background: linear-gradient(to bottom, #dd6b20, #c05621);
+        }
+
+        .toast--error {
             background: linear-gradient(to bottom, #e53e3e, #c53030);
         }
 
@@ -3224,7 +3281,7 @@
                         <button type="button" class="input-icon-btn" id="attachBtn" title="Dosya ekle" aria-label="Dosya ekle">📎</button>
                         <button type="button" class="input-icon-btn" id="voiceBtn" title="Ses kaydı" aria-label="Ses kaydı">🎤</button>
                     </div>
-                    <textarea id="messageInput" rows="1" placeholder="Mesajınızı yazın veya görsel yapıştırın..." aria-label="Mesaj" autocomplete="off" autocapitalize="sentences" spellcheck="true" data-1p-ignore data-lpignore="true"></textarea>
+                    <textarea id="messageInput" rows="1" placeholder="Mesaj yazın..." aria-label="Mesaj" autocomplete="off" autocapitalize="sentences" spellcheck="true" data-1p-ignore data-lpignore="true"></textarea>
                     <button class="send-btn" onclick="sendMessage()">Gönder</button>
                 </div>
             </div>
@@ -3412,9 +3469,8 @@
         <div class="welcome-modal" id="welcomeModal">
 
             <div class="welcome-modal-hero">
-                <h2 id="welcomeModalTitle">Woxi<span>fly</span></h2>
-                <p class="welcome-modal-tagline">Gerçek bir hesap makinesi arkasında gizlenmiş, kişiye özel sohbet</p>
-                <span class="welcome-modal-badge">🔒 Kamuflaj Aktif</span>
+                <h2 id="welcomeModalTitle">Woxi<span>fly</span><span class="brand-tld">.com</span></h2>
+                <p class="welcome-modal-tagline">Gerçek bir hesap makinesi ile kamufle edilmiş mesajlaşma sitesi</p>
             </div>
 
             <div class="welcome-modal-body">
@@ -3424,31 +3480,25 @@
 
                 <div class="welcome-features-grid">
                     <div class="welcome-feature-card">
-                        <div class="welcome-feature-card-icon" aria-hidden="true">🧮</div>
-                        <h4>Hesap Makinesi Perdesi</h4>
-                        <p>Uygulamayı açan herkes tam işlevsel bir hesap makinesiyle karşılaşır. Dışarıdan bakan birinin gizli bir sohbet paneli olduğunu tahmin etmesi zordur.</p>
-                        <button type="button" class="welcome-feature-card-cta">Şifreyi Dene</button>
+                        <div class="welcome-feature-card-icon" aria-hidden="true">
+                            <img src="/icons/calc-icon-192.png" alt="" width="48" height="48">
+                        </div>
+                        <h4>HESAP MAKİNASI KAMUFLAJI</h4>
+                        <p>Siteyi açan herkes tam işlevsel bir hesap makinesiyle karşılaşır. Dışarıdan bakan birinin gizli bir sohbet paneli olduğunu tahmin etmesi imkansızdır. Doğru PIN'i giren mesaj sitesine giriş yapar. Siteden çıkıldığı anda kamuflaj devreye girer.</p>
+                        <button type="button" class="welcome-feature-card-cta">Şimdi Dene</button>
                     </div>
 
                     <div class="welcome-feature-card">
                         <div class="welcome-feature-card-icon" aria-hidden="true">💬</div>
-                        <h4>7 günde imha</h4>
-                        <p>Ses, resim ve video paylaşın. 7 günü dolduran mesajlar arkada dijital iz bırakmadan otomatik olarak silinir.</p>
-                        <button type="button" class="welcome-feature-card-cta">Yazışma</button>
-                    </div>
-
-                    <div class="welcome-feature-card">
-                        <div class="welcome-feature-card-icon" aria-hidden="true">📱</div>
-                        <h4>Ana Ekrana Ekle</h4>
-                        <p>Uygulama marketlerine gerek kalmadan telefonunuza tek tıkla kaydedin. Güvenli ağa dahil olmak için ücretsiz hesap oluşturun.</p>
-                        <button type="button" class="welcome-feature-card-cta">PWA Kur</button>
+                        <h4>7 GÜNDE İMHA</h4>
+                        <p>Ses, resim ve video paylaşın. 7. gününü dolduran mesajlar arkada dijital iz bırakmadan otomatik olarak kalıcı olarak silinir.</p>
+                        <button type="button" class="welcome-feature-card-cta">Şimdi Dene</button>
                     </div>
                 </div>
 
                 <div class="welcome-modal-action">
                     <button type="button" class="welcome-modal-btn--secondary" id="welcomeLoginPrimaryBtn">Giriş Yap</button>
-                    <button type="button" class="welcome-modal-btn--primary" id="welcomeRegisterBtn">Hemen Kaydol</button>
-                    <button type="button" class="welcome-modal-login-link" id="welcomeLoginBtn">Zaten bir hesabın var mı? <strong>Giriş Yap</strong></button>
+                    <button type="button" class="welcome-modal-btn--primary" id="welcomeRegisterBtn">Kayıt Ol</button>
                 </div>
             </div>
         </div>
@@ -3458,7 +3508,8 @@
     <div class="auth-modal-overlay" id="authModalOverlay" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
         <div class="auth-modal" id="authModal">
             <div class="auth-modal-header">
-                <h3 id="authModalTitle">Woxi<span>fly</span></h3>
+                <h3 id="authModalTitle">Woxi<span>fly</span><span class="brand-tld">.com</span></h3>
+                <button type="button" class="auth-modal-close" id="authModalCloseBtn" aria-label="Kapat">×</button>
             </div>
             <div class="auth-modal-body">
                 <div class="auth-tabs">
@@ -3530,6 +3581,8 @@
             </div>
         </div>
     </div>
+
+    <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
 
     </div>
 

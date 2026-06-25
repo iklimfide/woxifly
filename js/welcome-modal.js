@@ -46,7 +46,6 @@ export function initWelcomeModal({ isLoggedIn, onLogin: loginHandler, onRegister
     };
 
     document.getElementById('welcomeLoginPrimaryBtn')?.addEventListener('click', openLogin);
-    document.getElementById('welcomeLoginBtn')?.addEventListener('click', openLogin);
 
     document.getElementById('welcomeRegisterBtn')?.addEventListener('click', () => {
         closeWelcomeModal();

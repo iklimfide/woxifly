@@ -6,7 +6,7 @@
   },
   "rewrites": [
     { "source": "/api/media/(.*)", "destination": "/api/media-serve?key=$1" },
-    { "source": "/((?!api/|js/|css/|shared/|icons/|favicon\\.png|manifest\\.json|manifest-calc\\.json|service-worker\\.js|robots\\.txt|sitemap\\.xml).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|js/|css/|shared/|icons/|favicon\\.png|robots\\.txt|sitemap\\.xml).*)", "destination": "/index.html" }
   ],
   "crons": [
     {
@@ -15,25 +15,6 @@
     }
   ],
   "headers": [
-    {
-      "source": "/service-worker.js",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-cache" },
-        { "key": "Service-Worker-Allowed", "value": "/" }
-      ]
-    },
-    {
-      "source": "/manifest.json",
-      "headers": [
-        { "key": "Content-Type", "value": "application/manifest+json" }
-      ]
-    },
-    {
-      "source": "/manifest-calc.json",
-      "headers": [
-        { "key": "Content-Type", "value": "application/manifest+json" }
-      ]
-    },
     {
       "source": "/api/cloud",
       "headers": [

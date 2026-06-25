@@ -1,13 +1,9 @@
 import { supabase, getSession } from './supabase-client.js';
 import { parseLegacyNotifyParam, usernameToSlug } from './app-routes.js';
 
-const SW_URL = '/service-worker.js';
 const MASKED_TITLE = 'Woxifly: Yeni bildirim';
 
-let swRegistration = null;
-let vapidPublicKey = null;
 let pushSupported = false;
-let webPushReady = false;
 let initReason = null;
 let profilePushEnabled = false;
 const foregroundNotificationCounts = new Map();
@@ -15,17 +11,6 @@ const foregroundNotificationCounts = new Map();
 function buildNotificationTag(data) {
     if (data.userId) return `dm-${data.userId}`;
     return 'woxifly-notification';
-}
-
-function urlBase64ToUint8Array(base64String) {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    const raw = atob(base64);
-    const output = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i += 1) {
-        output[i] = raw.charCodeAt(i);
-    }
-    return output;
 }
 
 function detectBrowserCapability() {
@@ -41,13 +26,15 @@ function detectBrowserCapability() {
     return { supported: true, reason: null };
 }
 
-async function authHeaders() {
-    const session = await getSession();
-    if (!session?.access_token) return null;
-    return {
-        Authorization: `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json'
-    };
+async function unregisterLegacyServiceWorkers() {
+    if (!('serviceWorker' in navigator)) return;
+
+    try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+    } catch (err) {
+        console.warn('Eski service worker kaldırılamadı:', err);
+    }
 }
 
 async function getPushEnabledFromProfile() {
@@ -91,146 +78,33 @@ export function isPushSupported() {
 }
 
 export function isWebPushReady() {
-    return webPushReady;
+    return false;
 }
 
 export function getPushInitReason() {
     return initReason;
 }
 
-function waitForServiceWorkerReady(timeoutMs = 8000) {
-    if (!navigator.serviceWorker?.ready) {
-        return Promise.resolve(null);
-    }
-
-    return Promise.race([
-        navigator.serviceWorker.ready,
-        new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('service_worker_ready_timeout')), timeoutMs);
-        })
-    ]);
-}
-
 export async function initPushNotifications() {
+    await unregisterLegacyServiceWorkers();
+
     const capability = detectBrowserCapability();
     pushSupported = capability.supported;
     initReason = capability.reason;
-    webPushReady = false;
 
     if (!pushSupported) {
         return { enabled: false, reason: initReason };
     }
 
-    if ('serviceWorker' in navigator) {
-        try {
-            swRegistration = await navigator.serviceWorker.register(SW_URL, {
-                scope: '/',
-                updateViaCache: 'none'
-            });
-            await waitForServiceWorkerReady();
-            swRegistration.update().catch(() => {});
-
-            swRegistration.addEventListener('updatefound', () => {
-                const worker = swRegistration.installing;
-                if (!worker) return;
-                worker.addEventListener('statechange', () => {
-                    if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-                        worker.postMessage({ type: 'SKIP_WAITING' });
-                    }
-                });
-            });
-
-            if (swRegistration.waiting) {
-                swRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
-            }
-
-            let swReloading = false;
-            navigator.serviceWorker.addEventListener('controllerchange', () => {
-                if (swReloading) return;
-                swReloading = true;
-                window.location.reload();
-            });
-
-            navigator.serviceWorker.addEventListener('message', (event) => {
-                if (event.data?.type === 'NOTIFICATION_CLICK') {
-                    window.dispatchEvent(new CustomEvent('woxifly:notification-click', {
-                        detail: event.data.data || {}
-                    }));
-                }
-            });
-        } catch (err) {
-            console.warn('Service worker kaydı başarısız:', err);
-            swRegistration = null;
-            initReason = err?.message === 'service_worker_ready_timeout'
-                ? 'sw_ready_timeout'
-                : 'sw_register_failed';
-        }
-    } else {
-        initReason = 'no_service_worker';
-    }
-
-    if (swRegistration?.pushManager) {
-        try {
-            const res = await fetch('/api/push-vapid-public');
-            const data = await res.json().catch(() => ({}));
-            if (data.enabled && data.publicKey) {
-                vapidPublicKey = data.publicKey;
-                webPushReady = true;
-                initReason = null;
-            } else if (!initReason) {
-                initReason = data.error ? 'vapid_missing' : 'vapid_unavailable';
-            }
-        } catch (err) {
-            console.warn('VAPID anahtarı alınamadı:', err);
-            if (!initReason) initReason = 'vapid_fetch_failed';
-        }
-    } else if (!initReason) {
-        initReason = 'no_push_manager';
-    }
-
-    return {
-        enabled: true,
-        webPush: webPushReady,
-        reason: initReason
-    };
+    return { enabled: true, reason: null };
 }
 
 export async function finalizePushInit() {
     await syncPushEnabledFromProfile().catch(() => {});
-    return ensurePushSubscription();
+    return getPushSubscriptionState();
 }
 
 export async function ensurePushSubscription() {
-    const pushEnabled = await getPushEnabledFromProfile();
-    if (!pushEnabled) return getPushSubscriptionState();
-
-    if (!pushSupported || Notification.permission !== 'granted') {
-        return getPushSubscriptionState();
-    }
-
-    if (!webPushReady || !swRegistration?.pushManager || !vapidPublicKey) {
-        return getPushSubscriptionState();
-    }
-
-    let subscription = await swRegistration.pushManager.getSubscription();
-    if (!subscription) {
-        try {
-            subscription = await swRegistration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
-            });
-        } catch (err) {
-            console.warn('Push aboneliği oluşturulamadı:', err);
-            return getPushSubscriptionState();
-        }
-    }
-
-    try {
-        await saveSubscription(subscription);
-    } catch (err) {
-        console.warn('Push aboneliği sunucuya kaydedilemedi:', err);
-    }
-
     return getPushSubscriptionState();
 }
 
@@ -242,57 +116,15 @@ export function getNotificationPermission() {
 export async function getPushSubscriptionState() {
     const permission = getNotificationPermission();
     const pushEnabled = await getPushEnabledFromProfile();
-
-    if (!swRegistration?.pushManager) {
-        return {
-            subscribed: false,
-            pushEnabled,
-            permission,
-            endpoint: null,
-            foregroundOnly: pushEnabled && permission === 'granted'
-        };
-    }
-
-    const sub = await swRegistration.pushManager.getSubscription();
-    const hasSubscription = !!sub;
+    const active = pushEnabled && permission === 'granted';
 
     return {
-        subscribed: pushEnabled && hasSubscription,
+        subscribed: active,
         pushEnabled,
         permission,
-        endpoint: sub?.endpoint || null,
-        foregroundOnly: pushEnabled && permission === 'granted' && !hasSubscription
+        endpoint: null,
+        foregroundOnly: false
     };
-}
-
-async function saveSubscription(subscription) {
-    const headers = await authHeaders();
-    if (!headers) throw new Error('Oturum gerekli.');
-
-    const json = subscription.toJSON();
-    const res = await fetch('/api/push-subscribe', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-            endpoint: json.endpoint,
-            keys: json.keys
-        })
-    });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'Abonelik kaydedilemedi.');
-    }
-}
-
-async function removeSubscription(endpoint) {
-    const headers = await authHeaders();
-    if (!headers) return;
-
-    await fetch(`/api/push-subscribe?endpoint=${encodeURIComponent(endpoint)}`, {
-        method: 'DELETE',
-        headers
-    });
 }
 
 export async function enablePushNotifications() {
@@ -300,7 +132,7 @@ export async function enablePushNotifications() {
         if (initReason === 'insecure_context') {
             throw new Error('Bildirimler için HTTPS gerekli (localhost hariç).');
         }
-        throw new Error('Bu tarayıcı masaüstü bildirimlerini desteklemiyor.');
+        throw new Error('Bu tarayıcı bildirimlerini desteklemiyor.');
     }
 
     const permission = await Notification.requestPermission();
@@ -309,31 +141,10 @@ export async function enablePushNotifications() {
     }
 
     await setPushEnabledInProfile(true);
-
-    if (webPushReady && swRegistration?.pushManager && vapidPublicKey) {
-        let subscription = await swRegistration.pushManager.getSubscription();
-        if (!subscription) {
-            subscription = await swRegistration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
-            });
-        }
-        await saveSubscription(subscription);
-    }
-
     return getPushSubscriptionState();
 }
 
 export async function disablePushNotifications() {
-    if (swRegistration?.pushManager) {
-        const subscription = await swRegistration.pushManager.getSubscription();
-        if (subscription) {
-            const endpoint = subscription.endpoint;
-            await subscription.unsubscribe();
-            await removeSubscription(endpoint);
-        }
-    }
-
     try {
         await setPushEnabledInProfile(false);
     } catch {
@@ -351,18 +162,11 @@ export async function togglePushNotifications() {
     return enablePushNotifications();
 }
 
-export async function notifyPushRecipients({ conversationId }) {
-    const headers = await authHeaders();
-    if (!headers || !conversationId) return;
-
-    fetch('/api/push-notify', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ conversationId })
-    }).catch((err) => console.warn('Push bildirimi tetiklenemedi:', err));
+export async function notifyPushRecipients() {
+    // Arka plan Web Push devre dışı — bildirimler tarayıcı sekmesi + çan ikonu ile gelir.
 }
 
-export function buildNotificationDataFromPayload(payload, activeChatId) {
+export function buildNotificationDataFromPayload(payload) {
     if (payload?.sender_id) {
         return { userId: payload.sender_id };
     }
@@ -431,7 +235,7 @@ export function clearNotifyQueryParam() {
     history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
 }
 
-export function describePushStatus({ permission, subscribed, foregroundOnly, pushEnabled }) {
+export function describePushStatus({ permission, subscribed, pushEnabled }) {
     if (!pushSupported) {
         if (initReason === 'insecure_context') {
             return {
@@ -474,16 +278,7 @@ export function describePushStatus({ permission, subscribed, foregroundOnly, pus
 
     if (subscribed) {
         return {
-            text: 'Bildirimler açık.',
-            className: 'push-status push-status--on',
-            buttonText: 'Bildirimleri Kapat',
-            disabled: false
-        };
-    }
-
-    if (foregroundOnly) {
-        return {
-            text: 'Bildirimler açık. Sekme açıkken uyarı alırsınız. Arka plan bildirimi için sunucu VAPID ayarı ve tarayıcı aboneliği gerekir.',
+            text: 'Bildirimler açık. Tarayıcı sekmesi açıkken uyarı ve çan ikonu çalışır.',
             className: 'push-status push-status--on',
             buttonText: 'Bildirimleri Kapat',
             disabled: false
@@ -500,7 +295,7 @@ export function describePushStatus({ permission, subscribed, foregroundOnly, pus
     }
 
     return {
-        text: 'Bildirimler açık.',
+        text: 'Bildirimler açık; tarayıcı izni bekleniyor.',
         className: 'push-status push-status--on',
         buttonText: 'Bildirimleri Kapat',
         disabled: false
