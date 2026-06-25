@@ -847,25 +847,58 @@
             color: #1e3a5f;
         }
         .message-selection-bar[hidden] { display: none !important; }
-        .message-selection-count { flex: 1; font-weight: 600; }
+        .message-selection-bar {
+            align-self: flex-end;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            margin: 0 2px 6px;
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 14px;
+            box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
+            max-width: calc(100% - 4px);
+            z-index: 20;
+        }
+        .message-selection-count {
+            font-weight: 700;
+            font-size: 0.88rem;
+            color: #0f172a;
+            white-space: nowrap;
+        }
         .message-selection-btn {
-            border: 1px solid var(--border-color);
-            background: #fff;
-            color: #334155;
-            border-radius: 8px;
-            padding: 6px 12px;
-            font-size: 0.78rem;
-            font-weight: 600;
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            color: #1e293b;
+            border-radius: 10px;
+            padding: 8px 16px;
+            font-size: 0.86rem;
+            font-weight: 700;
             cursor: pointer;
+            white-space: nowrap;
+        }
+        .message-selection-btn:active:not(:disabled) {
+            transform: scale(0.97);
         }
         .message-selection-btn:disabled {
-            opacity: 0.45;
+            opacity: 0.4;
             cursor: not-allowed;
         }
         .message-selection-btn--danger {
-            color: #b91c1c;
-            border-color: #fecaca;
-            background: #fef2f2;
+            color: #fff;
+            border-color: #dc2626;
+            background: #ef4444;
+        }
+        .message-selection-btn--danger:disabled {
+            color: #fff;
+            background: #fca5a5;
+            border-color: #fca5a5;
+        }
+        .message-selection-btn--muted {
+            color: #334155;
+            border-color: #94a3b8;
+            background: #e2e8f0;
         }
 
         .message-container.selection-mode .message {
@@ -950,6 +983,10 @@
 
         .quote-composer-slot:empty {
             display: none;
+        }
+
+        .edit-composer-bar .quote-composer-accent {
+            background: #3182ce;
         }
 
         .input-area {
@@ -1885,12 +1922,135 @@
         }
 
         /* BULUT YP */
+        .cloud-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border-color);
+            background: #fff;
+            flex-shrink: 0;
+        }
+
+        .cloud-tab {
+            flex: 1;
+            padding: 12px 16px;
+            border: none;
+            border-bottom: 2px solid transparent;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .cloud-tab.is-active {
+            color: #1a202c;
+            border-bottom-color: var(--primary-color, #3182ce);
+            background: #f8fafc;
+        }
+
+        .cloud-view {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .cloud-view[hidden] {
+            display: none !important;
+        }
+
         .cloud-shell {
             flex: 1;
             min-height: 0;
             position: relative;
             overflow: hidden;
             background: #f8fafc;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .cloud-view--chats {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .cloud-view--members {
+            background: #fff;
+        }
+
+        .cloud-members-list {
+            flex: 1;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .cloud-member-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            width: 100%;
+            text-align: left;
+            border: none;
+            border-bottom: 1px solid #edf2f7;
+            background: #fff;
+            padding: 12px;
+        }
+
+        .cloud-member-item__avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: #edf2f7;
+            flex-shrink: 0;
+        }
+
+        .cloud-member-item__avatar--placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            color: #64748b;
+            font-size: 0.95rem;
+        }
+
+        .cloud-member-item__body {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .cloud-member-item__title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 4px;
+        }
+
+        .cloud-member-item__badge {
+            font-size: 0.68rem;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 999px;
+            background: #e2e8f0;
+            color: #64748b;
+        }
+
+        .cloud-member-item__badge--hidden {
+            background: #fed7d7;
+            color: #c53030;
+        }
+
+        .cloud-member-item__meta,
+        .cloud-member-item__email {
+            display: block;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .cloud-sidebar,
@@ -2089,6 +2249,66 @@
             line-height: 1.45;
             white-space: pre-wrap;
             word-break: break-word;
+        }
+
+        .cloud-msg__caption {
+            margin: 6px 0 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .cloud-msg__body a.message-link,
+        .cloud-msg__caption a.message-link {
+            color: var(--accent-color);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            font-weight: 600;
+        }
+
+        .cloud-msg__media-thumb {
+            display: block;
+            position: relative;
+            padding: 0;
+            border: none;
+            border-radius: 6px;
+            overflow: hidden;
+            cursor: pointer;
+            max-width: min(120px, 100%);
+            background: #edf2f7;
+            line-height: 0;
+        }
+
+        .cloud-msg__media-thumb:focus-visible {
+            outline: 2px solid #3182ce;
+            outline-offset: 2px;
+        }
+
+        .cloud-msg__media-thumb img,
+        .cloud-msg__media-thumb video {
+            display: block;
+            width: 100%;
+            max-height: 90px;
+            object-fit: cover;
+            pointer-events: none;
+        }
+
+        .cloud-msg__play-icon {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.38);
+            color: #fff;
+            font-size: 1.1rem;
+            pointer-events: none;
+        }
+
+        .cloud-msg__audio {
+            display: block;
+            width: 100%;
+            max-width: 300px;
+            margin-top: 2px;
         }
 
         .cloud-load-older {
@@ -3240,15 +3460,17 @@
 
         <!-- PANEL 1: CHAT -->
         <div id="chat-panel" class="view-panel active">
-            <div class="message-selection-bar" id="messageSelectionBar" hidden>
-                <span class="message-selection-count" id="messageSelectionCount">0 seçildi</span>
-                <button type="button" class="message-selection-btn message-selection-btn--danger" id="messageSelectionDeleteBtn" disabled>Sil</button>
-                <button type="button" class="message-selection-btn" id="messageSelectionCancelBtn">İptal</button>
-            </div>
             <div class="message-container" id="messageContainer" hidden></div>
             <div class="input-area" id="messageInputArea" hidden>
+                <div class="message-selection-bar" id="messageSelectionBar" hidden>
+                    <span class="message-selection-count" id="messageSelectionCount">0 seçildi</span>
+                    <button type="button" class="message-selection-btn message-selection-btn--muted" id="messageSelectionHideBtn" disabled>Benden sil</button>
+                    <button type="button" class="message-selection-btn message-selection-btn--danger" id="messageSelectionDeleteEveryoneBtn" disabled>Herkesten sil</button>
+                    <button type="button" class="message-selection-btn" id="messageSelectionCancelBtn">İptal</button>
+                </div>
                 <div class="upload-status" id="uploadStatus" hidden>Medya yükleniyor...</div>
                 <div id="quoteComposerSlot" class="quote-composer-slot"></div>
+                <div id="editComposerSlot" class="quote-composer-slot"></div>
                 <div id="mediaComposerSlot" class="quote-composer-slot"></div>
                 <div id="forwardComposerSlot" class="quote-composer-slot"></div>
                 <div class="voice-recording-panel" id="voiceRecordingPanel" hidden>
@@ -3398,26 +3620,41 @@
 
         <!-- PANEL 3: BULUT YP -->
         <div id="bulut-panel" class="view-panel">
+            <div class="cloud-tabs" role="tablist" aria-label="Bulut YP">
+                <button type="button" class="cloud-tab is-active" id="cloudTabChats" data-cloud-tab="chats" role="tab" aria-selected="true">Sohbetler</button>
+                <button type="button" class="cloud-tab" id="cloudTabMembers" data-cloud-tab="members" role="tab" aria-selected="false">Üyeler</button>
+            </div>
             <div class="cloud-shell">
-                <aside class="cloud-sidebar">
-                    <div class="cloud-toolbar">
-                        <input type="search" id="cloudSearchInput" placeholder="Sohbet veya rumuz ara…" autocomplete="off">
-                        <button type="button" id="cloudRefreshBtn">Yenile</button>
-                    </div>
-                    <div class="cloud-status" id="cloudStatus">Sohbetler yükleniyor…</div>
-                    <div class="cloud-conversation-list" id="cloudConversationList"></div>
-                </aside>
-                <section class="cloud-thread">
-                    <div class="cloud-thread-header">
-                        <button type="button" class="cloud-thread-back" id="cloudThreadBack" hidden aria-label="Sohbet listesine dön">← Geri</button>
-                        <div class="cloud-thread-title-wrap">
-                            <div class="cloud-thread-title" id="cloudThreadTitle">Sohbet seçin</div>
-                            <div class="cloud-thread-meta" id="cloudThreadMeta">Soldan bir yazışma seçerek içeriği görüntüleyin.</div>
+                <div class="cloud-view cloud-view--chats" id="cloudChatsView">
+                    <aside class="cloud-sidebar">
+                        <div class="cloud-toolbar">
+                            <input type="search" id="cloudSearchInput" placeholder="Sohbet veya rumuz ara…" autocomplete="off">
+                            <button type="button" id="cloudRefreshBtn">Yenile</button>
                         </div>
+                        <div class="cloud-status" id="cloudStatus">Sohbetler yükleniyor…</div>
+                        <div class="cloud-conversation-list" id="cloudConversationList"></div>
+                    </aside>
+                    <section class="cloud-thread">
+                        <div class="cloud-thread-header">
+                            <button type="button" class="cloud-thread-back" id="cloudThreadBack" hidden aria-label="Sohbet listesine dön">← Geri</button>
+                            <div class="cloud-thread-title-wrap">
+                                <div class="cloud-thread-title" id="cloudThreadTitle">Sohbet seçin</div>
+                                <div class="cloud-thread-meta" id="cloudThreadMeta">Soldan bir yazışma seçerek içeriği görüntüleyin.</div>
+                            </div>
+                        </div>
+                        <div class="cloud-message-thread" id="cloudMessageThread"></div>
+                        <button type="button" class="cloud-load-older" id="cloudLoadOlderBtn" hidden>Daha eski mesajları yükle</button>
+                    </section>
+                </div>
+                <div class="cloud-view cloud-view--members" id="cloudMembersView" hidden>
+                    <div class="cloud-toolbar">
+                        <input type="search" id="cloudMembersSearchInput" placeholder="Rumuz veya konum ara…" autocomplete="off">
+                        <button type="button" id="cloudMembersRefreshBtn">Yenile</button>
                     </div>
-                    <div class="cloud-message-thread" id="cloudMessageThread"></div>
-                    <button type="button" class="cloud-load-older" id="cloudLoadOlderBtn" hidden>Daha eski mesajları yükle</button>
-                </section>
+                    <div class="cloud-status" id="cloudMembersStatus">Üyeler yükleniyor…</div>
+                    <div class="cloud-members-list" id="cloudMembersList"></div>
+                    <button type="button" class="cloud-load-older" id="cloudLoadMoreMembersBtn" hidden>Daha fazla üye yükle</button>
+                </div>
             </div>
         </div>
     </main>

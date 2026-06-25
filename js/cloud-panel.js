@@ -1,15 +1,24 @@
-import { formatTime } from './utils.js';
+import { formatTime, appendTextWithLinks } from './utils.js';
+import { resolveMessageMediaUrl } from './media/urls.js';
+import { openViewer } from './media/viewer.js';
 
 const CLOUD_PAGE_SIZE = 50;
+const CLOUD_MEMBERS_PAGE_SIZE = 50;
 
 let deps = null;
 let isCloudAdmin = false;
 let lastAdminError = null;
+let activeCloudTab = 'chats';
 let activeConversationId = null;
 let messagesBefore = null;
 let messagesHasMore = false;
 let conversations = [];
+let members = [];
+let membersOffset = 0;
+let membersHasMore = false;
+let membersTotal = null;
 let searchTimer = null;
+let membersSearchTimer = null;
 
 function el(id) {
     return document.getElementById(id);
@@ -132,6 +141,138 @@ function formatDateLabel(iso) {
     });
 }
 
+function setMembersStatus(text, isError = false) {
+    const status = el('cloudMembersStatus');
+    if (!status) return;
+    status.textContent = text || '';
+    status.classList.toggle('cloud-status--error', isError);
+}
+
+function formatMemberDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString('tr-TR', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function memberInitial(username) {
+    const value = String(username || '?').trim();
+    return value ? value.charAt(0).toUpperCase() : '?';
+}
+
+function renderMembersList({ append = false } = {}) {
+    const list = el('cloudMembersList');
+    if (!list) return;
+
+    if (!append) list.innerHTML = '';
+
+    if (!members.length && !append) {
+        const empty = document.createElement('p');
+        empty.className = 'cloud-empty';
+        empty.textContent = 'Üye bulunamadı.';
+        list.appendChild(empty);
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    const startIndex = append ? list.querySelectorAll('.cloud-member-item').length : 0;
+
+    for (let i = startIndex; i < members.length; i++) {
+        const member = members[i];
+        const row = document.createElement('div');
+        row.className = 'cloud-member-item';
+
+        const avatar = member.avatarUrl
+            ? `<img class="cloud-member-item__avatar" src="${escapeHtml(member.avatarUrl)}" alt="" loading="lazy">`
+            : `<div class="cloud-member-item__avatar cloud-member-item__avatar--placeholder" aria-hidden="true">${escapeHtml(memberInitial(member.username))}</div>`;
+
+        const visibilityBadge = member.isVisible
+            ? ''
+            : '<span class="cloud-member-item__badge cloud-member-item__badge--hidden">Gizli</span>';
+
+        row.innerHTML = `
+            ${avatar}
+            <div class="cloud-member-item__body">
+                <div class="cloud-member-item__title">
+                    <span>${escapeHtml(member.username)}</span>
+                    ${visibilityBadge}
+                </div>
+                <span class="cloud-member-item__meta">${escapeHtml(member.location)} · ${escapeHtml(formatMemberDate(member.createdAt))}</span>
+                ${member.email ? `<span class="cloud-member-item__email">${escapeHtml(member.email)}</span>` : ''}
+            </div>
+        `;
+        fragment.appendChild(row);
+    }
+
+    list.appendChild(fragment);
+
+    const loadMoreBtn = el('cloudLoadMoreMembersBtn');
+    if (loadMoreBtn) loadMoreBtn.hidden = !membersHasMore;
+}
+
+async function loadMembers({ append = false } = {}) {
+    const q = el('cloudMembersSearchInput')?.value?.trim() || '';
+    const offset = append ? membersOffset : 0;
+
+    setMembersStatus(append ? 'Daha fazla üye yükleniyor…' : 'Üyeler yükleniyor…');
+
+    try {
+        const data = await cloudFetch('members', {
+            q,
+            limit: String(CLOUD_MEMBERS_PAGE_SIZE),
+            offset: String(offset)
+        });
+
+        const batch = data.members || [];
+        members = append ? members.concat(batch) : batch;
+        membersOffset = members.length;
+        membersHasMore = !!data.hasMore;
+        membersTotal = typeof data.total === 'number' ? data.total : null;
+
+        renderMembersList({ append });
+
+        const totalLabel = membersTotal != null ? `${members.length} / ${membersTotal} üye` : `${members.length} üye`;
+        setMembersStatus(members.length ? totalLabel : 'Üye yok');
+    } catch (err) {
+        if (!append) {
+            members = [];
+            renderMembersList();
+        }
+        setMembersStatus(err.message, true);
+    }
+}
+
+function switchCloudTab(tab) {
+    activeCloudTab = tab === 'members' ? 'members' : 'chats';
+
+    const chatsView = el('cloudChatsView');
+    const membersView = el('cloudMembersView');
+    const tabChats = el('cloudTabChats');
+    const tabMembers = el('cloudTabMembers');
+    const panel = el('bulut-panel');
+
+    const isMembers = activeCloudTab === 'members';
+
+    chatsView?.toggleAttribute('hidden', isMembers);
+    membersView?.toggleAttribute('hidden', !isMembers);
+
+    tabChats?.classList.toggle('is-active', !isMembers);
+    tabMembers?.classList.toggle('is-active', isMembers);
+    tabChats?.setAttribute('aria-selected', String(!isMembers));
+    tabMembers?.setAttribute('aria-selected', String(isMembers));
+
+    if (isMembers) {
+        panel?.classList.remove('cloud-detail-open');
+        if (!members.length) {
+            void loadMembers();
+        }
+    }
+}
+
 function renderConversationList() {
     const list = el('cloudConversationList');
     if (!list) return;
@@ -162,6 +303,108 @@ function renderConversationList() {
     }
 }
 
+function createCloudMessageRow(message) {
+    const isDeleted = !!message.deletedAt;
+    const row = document.createElement('div');
+    row.className = 'cloud-msg' + (isDeleted ? ' cloud-msg--deleted' : '');
+
+    const head = document.createElement('div');
+    head.className = 'cloud-msg__head';
+
+    const sender = document.createElement('strong');
+    sender.textContent = message.senderName || 'Kullanıcı';
+    if (message.receiverName) {
+        sender.textContent += ` → ${message.receiverName}`;
+    }
+
+    const time = document.createElement('span');
+    time.textContent = formatDateLabel(message.createdAt);
+
+    head.append(sender, time);
+
+    const bodyWrap = document.createElement('div');
+    bodyWrap.className = 'cloud-msg__body';
+
+    if (isDeleted) {
+        appendCloudMessageText(bodyWrap, message);
+        row.append(head, bodyWrap);
+        return row;
+    }
+
+    const contentType = message.contentType || 'text';
+    const mediaSrc = resolveMessageMediaUrl(message.mediaUrl, message.r2Key);
+    const caption = (message.body || '').trim();
+
+    if (contentType === 'image' && mediaSrc) {
+        bodyWrap.appendChild(createCloudMediaThumb(mediaSrc, 'image'));
+        if (caption) bodyWrap.appendChild(createCloudCaption(caption));
+    } else if (contentType === 'video' && mediaSrc) {
+        bodyWrap.appendChild(createCloudMediaThumb(mediaSrc, 'video'));
+        if (caption) bodyWrap.appendChild(createCloudCaption(caption));
+    } else if (contentType === 'audio' && mediaSrc) {
+        const audio = document.createElement('audio');
+        audio.className = 'cloud-msg__audio';
+        audio.controls = true;
+        audio.preload = 'metadata';
+        audio.src = mediaSrc;
+        bodyWrap.appendChild(audio);
+        if (caption) bodyWrap.appendChild(createCloudCaption(caption));
+    } else {
+        appendCloudMessageText(bodyWrap, message);
+    }
+
+    row.append(head, bodyWrap);
+    return row;
+}
+
+function appendCloudMessageText(parent, message) {
+    const text = (message.body || '').trim();
+    if (text) {
+        appendTextWithLinks(parent, text);
+        return;
+    }
+    parent.textContent = formatMessageBody(message);
+}
+
+function createCloudCaption(text) {
+    const cap = document.createElement('p');
+    cap.className = 'cloud-msg__caption';
+    appendTextWithLinks(cap, text);
+    return cap;
+}
+
+function createCloudMediaThumb(src, kind) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `cloud-msg__media-thumb${kind === 'video' ? ' cloud-msg__media-thumb--video' : ''}`;
+    btn.title = kind === 'video' ? 'Videoyu aç' : 'Görseli aç';
+
+    if (kind === 'video') {
+        const video = document.createElement('video');
+        video.src = src;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        video.setAttribute('aria-hidden', 'true');
+        btn.appendChild(video);
+
+        const playIcon = document.createElement('span');
+        playIcon.className = 'cloud-msg__play-icon';
+        playIcon.setAttribute('aria-hidden', 'true');
+        playIcon.textContent = '▶';
+        btn.appendChild(playIcon);
+    } else {
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = 'Görsel';
+        img.loading = 'lazy';
+        btn.appendChild(img);
+    }
+
+    btn.addEventListener('click', () => openViewer(src, kind));
+    return btn;
+}
+
 function renderMessages({ conversation, messages, prepend = false }) {
     const title = el('cloudThreadTitle');
     const meta = el('cloudThreadMeta');
@@ -182,17 +425,7 @@ function renderMessages({ conversation, messages, prepend = false }) {
     } else {
         const fragment = document.createDocumentFragment();
         for (const message of messages) {
-            const isDeleted = !!message.deletedAt;
-            const row = document.createElement('div');
-            row.className = 'cloud-msg' + (isDeleted ? ' cloud-msg--deleted' : '');
-            row.innerHTML = `
-                <div class="cloud-msg__head">
-                    <strong>${escapeHtml(message.senderName)}${message.receiverName ? ` → ${escapeHtml(message.receiverName)}` : ''}</strong>
-                    <span>${escapeHtml(formatDateLabel(message.createdAt))}</span>
-                </div>
-                <div class="cloud-msg__body">${escapeHtml(formatMessageBody(message))}</div>
-            `;
-            fragment.appendChild(row);
+            fragment.appendChild(createCloudMessageRow(message));
         }
 
         if (prepend && thread.firstChild) {
@@ -301,6 +534,8 @@ export async function openCloudPanel() {
     }
 
     deps.switchView('bulut-panel');
+    activeCloudTab = 'chats';
+    switchCloudTab('chats');
     activeConversationId = null;
     messagesBefore = null;
     el('bulut-panel')?.classList.remove('cloud-detail-open');
@@ -313,6 +548,12 @@ export async function openCloudPanel() {
 export function initCloudPanel(options) {
     deps = options;
 
+    document.querySelectorAll('[data-cloud-tab]').forEach((button) => {
+        button.addEventListener('click', () => {
+            switchCloudTab(button.dataset.cloudTab);
+        });
+    });
+
     el('cloudSearchInput')?.addEventListener('input', () => {
         clearTimeout(searchTimer);
         searchTimer = setTimeout(() => loadConversations(), 250);
@@ -324,6 +565,20 @@ export function initCloudPanel(options) {
         } else {
             loadConversations();
         }
+    });
+
+    el('cloudMembersSearchInput')?.addEventListener('input', () => {
+        clearTimeout(membersSearchTimer);
+        membersSearchTimer = setTimeout(() => loadMembers(), 250);
+    });
+
+    el('cloudMembersRefreshBtn')?.addEventListener('click', () => {
+        loadMembers();
+    });
+
+    el('cloudLoadMoreMembersBtn')?.addEventListener('click', () => {
+        if (!membersHasMore) return;
+        loadMembers({ append: true });
     });
 
     el('cloudLoadOlderBtn')?.addEventListener('click', () => {
@@ -342,6 +597,11 @@ export function initCloudPanel(options) {
 
 export function resetCloudPanel() {
     activeConversationId = null;
+    activeCloudTab = 'chats';
     conversations = [];
+    members = [];
+    membersOffset = 0;
+    membersHasMore = false;
+    membersTotal = null;
     isCloudAdmin = false;
 }

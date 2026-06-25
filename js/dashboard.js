@@ -34,7 +34,8 @@ import {
     syncDmNotificationRooms,
     broadcastShout,
     broadcastReaction,
-    broadcastMessageDelete
+    broadcastMessageDelete,
+    broadcastMessageEdit
 } from './realtime-chat.js';
 import { sanitizeText, isValidUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles, initPinVisibilityToggles, appendMessageToContainer, createMessageDateSeparator, getCalendarDayKey } from './utils.js';
 import {
@@ -89,6 +90,9 @@ import {
     initMessageInteractions,
     getPendingQuote,
     clearPendingQuote,
+    getPendingEdit,
+    clearPendingEdit,
+    applyMessageEditInDom,
     serializeQuote,
     aggregateReactions,
     reactionsMapToList,
@@ -151,7 +155,7 @@ let messageHistoryOldestAt = null;
 let messageHistoryLoadingOlder = false;
 
 const MESSAGE_HISTORY_SELECT =
-    'id, body, created_at, sender_id, sender_username, content_type, media_url, r2_key, client_id, quote';
+    'id, body, created_at, edited_at, sender_id, sender_username, content_type, media_url, r2_key, client_id, quote';
 const dmConversations = new Map();
 const dmTitles = new Map();
 let mostRecentDmChat = null;
@@ -876,6 +880,7 @@ async function showChatListHome() {
     leaveRealtimeRoom();
     refreshDmNotificationListeners();
     clearPendingQuote();
+    clearPendingEdit();
     clearPendingComposerMedia();
     clearPendingForward();
     exitSelectionMode(document.getElementById('messageContainer'));
@@ -1375,6 +1380,18 @@ function handleIncomingDeleteBroadcast(payload) {
     updateSelectionBarUi();
 }
 
+function handleIncomingEditBroadcast(payload) {
+    if (!payload?.body) return;
+    if (payload.user_id === currentUserId) return;
+
+    applyMessageEditInDom({
+        messageId: payload.message_id || null,
+        clientId: payload.client_id || null,
+        body: payload.body,
+        editedAt: payload.edited_at || null
+    });
+}
+
 function subscribeDmRealtime(conversationId) {
     joinDmRoom(supabase, conversationId, {
         userId: currentUserId,
@@ -1382,6 +1399,7 @@ function subscribeDmRealtime(conversationId) {
         onMessage: handleIncomingBroadcast,
         onReaction: handleIncomingReactionBroadcast,
         onDelete: handleIncomingDeleteBroadcast,
+        onEdit: handleIncomingEditBroadcast,
         onPresence: (count) => {
             const statusEl = document.getElementById('activeChatStatus');
             if (currentActiveChat?.startsWith('User-')) {
@@ -1404,6 +1422,7 @@ function createMessageHistoryElement(msg, { profileMap = {}, reactionsByMessage 
         sender: senderName,
         body: msg.body || '',
         time: formatTime(msg.created_at),
+        editedAt: msg.edited_at || null,
         isOutgoing,
         senderId: isOutgoing ? null : msg.sender_id,
         contentType: msg.content_type || 'text',
@@ -1704,7 +1723,7 @@ async function resolveMessageIds(targets) {
     return { messageIds, clientIds };
 }
 
-async function softDeleteMessages(targets) {
+async function deleteMessages(targets, scope = 'me') {
     if (!isLoggedIn()) {
         promptLogin();
         return;
@@ -1712,9 +1731,18 @@ async function softDeleteMessages(targets) {
 
     if (!targets?.length) return;
 
+    const deleteScope = scope === 'everyone' ? 'everyone' : 'me';
     const { messageIds, clientIds } = await resolveMessageIds(targets);
 
-    if (messageIds.length) {
+    if (deleteScope === 'everyone') {
+        if (!messageIds.length) {
+            showNotify('Herkesten silmek için yalnızca kendi gönderdiğiniz mesajları seçin.', {
+                title: 'Herkesten sil',
+                type: 'warning'
+            });
+            return;
+        }
+
         const { data: deletedCount, error } = await supabase.rpc('soft_delete_messages', {
             p_message_ids: messageIds
         });
@@ -1726,9 +1754,35 @@ async function softDeleteMessages(targets) {
         }
 
         if (!deletedCount) {
-            showNotify('Silinecek mesaj bulunamadı.', { title: 'Silme', type: 'warning' });
+            showNotify('Herkesten silinecek mesaj bulunamadı. Yalnızca sizin gönderdiğiniz mesajlar silinir.', {
+                title: 'Herkesten sil',
+                type: 'warning'
+            });
             return;
         }
+
+        broadcastMessageDelete({
+            message_ids: messageIds,
+            client_ids: clientIds,
+            user_id: currentUserId
+        }).catch((err) => console.error('Silme yayını başarısız:', err));
+    } else if (messageIds.length) {
+        const { data: hiddenCount, error } = await supabase.rpc('hide_messages_for_me', {
+            p_message_ids: messageIds
+        });
+
+        if (error) {
+            console.error('Mesaj gizlenemedi:', error.message);
+            showNotify('Mesajlar silinemedi: ' + error.message, { title: 'Silme hatası', type: 'error' });
+            return;
+        }
+
+        if (!hiddenCount) {
+            showNotify('Silinecek mesaj bulunamadı.', { title: 'Benden sil', type: 'warning' });
+            return;
+        }
+
+        purgeMessagesFromCache(currentConversationId, messageIds);
     }
 
     removeMessagesFromDom({ messageIds, clientIds });
@@ -1738,54 +1792,161 @@ async function softDeleteMessages(targets) {
     if (isSelectionMode()) {
         exitSelectionMode(document.getElementById('messageContainer'));
     }
-
-    broadcastMessageDelete({
-        message_ids: messageIds,
-        client_ids: clientIds,
-        user_id: currentUserId
-    }).catch((err) => console.error('Silme yayını başarısız:', err));
 }
 
-async function deleteSelectedMessages() {
-    const keys = getSelectedMessageKeys();
-    if (!keys.size) return;
+function purgeMessagesFromCache(conversationId, messageIds = []) {
+    if (!currentUserId || !conversationId || !messageIds.length) return;
 
+    const idSet = new Set(messageIds);
+    const cached = getCachedMessageHistory(currentUserId, conversationId);
+    if (!cached?.messages?.length) return;
+
+    setCachedMessageHistory(currentUserId, conversationId, {
+        ...cached,
+        messages: cached.messages.filter((message) => !idSet.has(message.id)),
+        reactionRows: (cached.reactionRows || []).filter((row) => !idSet.has(row.message_id))
+    });
+}
+
+async function saveEditedMessage(pendingEdit, rawBody) {
+    const body = sanitizeText(rawBody || '', 2000);
+    if (!body) {
+        showNotify('Mesaj boş olamaz.', { title: 'Düzenleme', type: 'warning' });
+        return;
+    }
+
+    const original = sanitizeText(pendingEdit.originalBody || '', 2000);
+    if (body === original) {
+        clearPendingEdit();
+        resetMessageInput();
+        return;
+    }
+
+    let messageId = pendingEdit.messageId;
+    if (!messageId && pendingEdit.clientId) {
+        const { data } = await supabase
+            .from('messages')
+            .select('id')
+            .eq('client_id', pendingEdit.clientId)
+            .maybeSingle();
+        messageId = data?.id || null;
+        if (messageId) {
+            setMessageDbIdByClientId(pendingEdit.clientId, messageId);
+        }
+    }
+
+    if (!messageId) {
+        showNotify('Mesaj henüz kaydedilmedi. Birkaç saniye sonra tekrar deneyin.', {
+            title: 'Düzenleme',
+            type: 'warning'
+        });
+        return;
+    }
+
+    const { data: updated, error } = await supabase.rpc('edit_message', {
+        p_message_id: messageId,
+        p_body: body
+    });
+
+    if (error) {
+        console.error('Mesaj düzenlenemedi:', error.message);
+        showNotify('Mesaj düzenlenemedi: ' + error.message, { title: 'Düzenleme hatası', type: 'error' });
+        return;
+    }
+
+    if (!updated) {
+        showNotify('Bu mesaj düzenlenemiyor.', { title: 'Düzenleme', type: 'warning' });
+        return;
+    }
+
+    const editedAt = new Date().toISOString();
+    applyMessageEditInDom({
+        messageId,
+        clientId: pendingEdit.clientId,
+        body,
+        editedAt
+    });
+
+    clearPendingEdit();
+    resetMessageInput();
+
+    broadcastMessageEdit({
+        message_id: messageId,
+        client_id: pendingEdit.clientId,
+        body,
+        edited_at: editedAt,
+        user_id: currentUserId
+    }).catch((err) => console.error('Düzenleme yayını başarısız:', err));
+}
+
+function getSelectedMessageTargets() {
+    const keys = getSelectedMessageKeys();
     const targets = [];
+
     document.querySelectorAll('.message').forEach((el) => {
         const key = el.dataset.messageId || el.dataset.clientId;
         if (key && keys.has(key)) {
             targets.push({
                 messageId: el.dataset.messageId || null,
-                clientId: el.dataset.clientId || null
+                clientId: el.dataset.clientId || null,
+                isOutgoing: el.classList.contains('outgoing')
             });
         }
     });
 
-    await softDeleteMessages(targets);
+    return targets;
+}
+
+async function deleteSelectedMessages(scope = 'me') {
+    const targets = getSelectedMessageTargets();
+    if (!targets.length) return;
+
+    if (scope === 'everyone') {
+        const ownTargets = targets.filter((target) => target.isOutgoing);
+        if (!ownTargets.length) {
+            showNotify('Herkesten silmek için kendi gönderdiğiniz mesajları seçin.', {
+                title: 'Herkesten sil',
+                type: 'warning'
+            });
+            return;
+        }
+        await deleteMessages(ownTargets, 'everyone');
+        return;
+    }
+
+    await deleteMessages(targets, 'me');
 }
 
 function updateSelectionBarUi(count = null) {
     const bar = document.getElementById('messageSelectionBar');
     const countEl = document.getElementById('messageSelectionCount');
-    const deleteBtn = document.getElementById('messageSelectionDeleteBtn');
+    const hideBtn = document.getElementById('messageSelectionHideBtn');
+    const deleteEveryoneBtn = document.getElementById('messageSelectionDeleteEveryoneBtn');
     const container = document.getElementById('messageContainer');
 
     const selectedCount = count ?? getSelectedMessageKeys().size;
     const active = isSelectionMode();
+    const hasOwnOutgoing = getSelectedMessageTargets().some((target) => target.isOutgoing);
 
     bar?.toggleAttribute('hidden', !active);
     if (countEl) countEl.textContent = `${selectedCount} seçildi`;
-    if (deleteBtn) deleteBtn.disabled = selectedCount < 1;
+    if (hideBtn) hideBtn.disabled = selectedCount < 1;
+    if (deleteEveryoneBtn) deleteEveryoneBtn.disabled = selectedCount < 1 || !hasOwnOutgoing;
     container?.classList.toggle('selection-mode', active);
 }
 
 function initMessageSelectionControls() {
     const messageContainer = document.getElementById('messageContainer');
-    const deleteBtn = document.getElementById('messageSelectionDeleteBtn');
+    const hideBtn = document.getElementById('messageSelectionHideBtn');
+    const deleteEveryoneBtn = document.getElementById('messageSelectionDeleteEveryoneBtn');
     const cancelBtn = document.getElementById('messageSelectionCancelBtn');
 
-    deleteBtn?.addEventListener('click', () => {
-        deleteSelectedMessages();
+    hideBtn?.addEventListener('click', () => {
+        deleteSelectedMessages('me');
+    });
+
+    deleteEveryoneBtn?.addEventListener('click', () => {
+        deleteSelectedMessages('everyone');
     });
 
     cancelBtn?.addEventListener('click', () => {
@@ -2238,15 +2399,18 @@ function renderForwardComposerBar() {
 
     const title = document.createElement('div');
     title.className = 'forward-composer-title';
-    title.textContent = 'Mesaj ilet';
+    title.textContent = 'Alıcı seçin';
 
     const preview = document.createElement('div');
     preview.className = 'forward-composer-preview';
-    preview.textContent = pendingForward.body
+    const previewText = pendingForward.body
         || formatQuotePreview({
             content_type: pendingForward.contentType,
             body: ''
         });
+    preview.textContent = previewText
+        ? `İletilecek: ${previewText}`
+        : 'Soldan bir sohbet seçin';
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -2266,8 +2430,6 @@ function handleForwardRequest(payload) {
     pendingForward = payload;
     pendingForwardSourceChat = currentActiveChat;
     renderForwardComposerBar();
-
-    showNotify('İletmek için soldan bir sohbet seçin.', { title: 'Mesaj ilet', type: 'info' });
 
     if (isMobileLayout()) {
         const sidebar = document.getElementById('sidebar');
@@ -2292,8 +2454,6 @@ async function deliverPendingForward() {
         contentType: hasMedia ? contentType : 'text',
         mediaUrl: hasMedia ? payload.mediaUrl : null
     });
-
-    showNotify('Mesaj iletildi.', { title: 'İlet', type: 'success' });
 }
 
 async function openChat(chatId, title, { avatarUrl = null } = {}) {
@@ -2319,6 +2479,7 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
     const senderId = chatId.replace('User-', '');
     markNotificationsReadForChat(chatId, senderId);
     clearPendingQuote();
+    clearPendingEdit();
     clearPendingComposerMedia();
     exitSelectionMode(document.getElementById('messageContainer'));
     updateSelectionBarUi(0);
@@ -2368,6 +2529,7 @@ async function sendMessage() {
     const input = document.getElementById('messageInput');
     const body = sanitizeText(input?.value || '', 2000);
     const quote = getPendingQuote();
+    const pendingEdit = getPendingEdit();
 
     if (typeof finishVoiceRecordingToPending === 'function') {
         await finishVoiceRecordingToPending();
@@ -2376,9 +2538,14 @@ async function sendMessage() {
     if (isMediaSendModalOpen()) return;
 
     const hasPendingMedia = Boolean(pendingComposerMedia);
-    if (!body && !hasPendingMedia) return;
+    if (!body && !hasPendingMedia && !pendingEdit) return;
 
     try {
+        if (pendingEdit) {
+            await saveEditedMessage(pendingEdit, body);
+            return;
+        }
+
         if (hasPendingMedia) {
             clearPendingQuote();
             resetMessageInput();
@@ -2905,7 +3072,7 @@ async function initDashboard() {
             showQuoteAuthor: false
         }),
         onReactionToggle: toggleMessageReaction,
-        onDeleteMessages: softDeleteMessages,
+        onDeleteMessages: deleteMessages,
         onSelectionChange: updateSelectionBarUi,
         onForwardMessage: handleForwardRequest,
         showNotify

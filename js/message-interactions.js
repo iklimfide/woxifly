@@ -1,10 +1,12 @@
-import { formatQuotePreview, formatQuoteAuthorLabel } from './utils.js';
+import { formatQuotePreview, formatQuoteAuthorLabel, appendTextWithLinks } from './utils.js';
 import { displayMediaUrl } from './media/urls.js';
 import { showToast } from './notify-modal.js';
+import { resizeMessageInput } from './media/composer.js';
 
 export const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
 let pendingQuote = null;
+let pendingEdit = null;
 let activeContextMenu = null;
 let contextMenuTarget = null;
 let suppressNativeContextMenu = false;
@@ -135,12 +137,58 @@ export function getPendingQuote() {
 
 export function setPendingQuote(quote) {
     pendingQuote = quote;
+    pendingEdit = null;
+    renderEditComposerBar();
+    syncComposerActionButton();
     renderQuoteComposerBar();
 }
 
 export function clearPendingQuote() {
     pendingQuote = null;
     renderQuoteComposerBar();
+}
+
+export function getPendingEdit() {
+    return pendingEdit;
+}
+
+export function clearPendingEdit() {
+    pendingEdit = null;
+    renderEditComposerBar();
+    syncComposerActionButton();
+}
+
+export function setPendingEdit(edit) {
+    pendingEdit = edit;
+    pendingQuote = null;
+    renderQuoteComposerBar();
+    renderEditComposerBar();
+    syncComposerActionButton();
+}
+
+function syncComposerActionButton() {
+    const btn = document.querySelector('#messageInputArea .send-btn');
+    if (!btn) return;
+    btn.textContent = pendingEdit ? 'Kaydet' : 'Gönder';
+}
+
+export function applyMessageEditInDom({ messageId, clientId, body, editedAt }) {
+    const messageEl = findMessageElement({ messageId, clientId });
+    if (!messageEl) return;
+
+    const bodyEl = messageEl.querySelector('.message-body');
+    if (bodyEl) {
+        bodyEl.replaceChildren();
+        appendTextWithLinks(bodyEl, body || '');
+    }
+
+    const metaEl = messageEl.querySelector('.message-meta');
+    if (metaEl) {
+        const baseTime = (metaEl.textContent || '').split(' · ')[0].trim();
+        metaEl.textContent = editedAt ? `${baseTime} · düzenlendi` : baseTime;
+    }
+
+    if (editedAt) messageEl.dataset.editedAt = editedAt;
 }
 
 export function serializeQuote(quote) {
@@ -550,6 +598,80 @@ function appendContextDivider(menu) {
     menu.appendChild(document.createElement('div')).className = 'message-context-divider';
 }
 
+function canEditMessage(messageEl) {
+    if (!messageEl?.classList.contains('outgoing')) return false;
+    const contentType = messageEl.dataset.contentType || 'text';
+    if (contentType !== 'text') return false;
+    return !!messageEl.querySelector('.message-body');
+}
+
+function startEditMessage(messageEl) {
+    const ctx = getAuthContext?.();
+    if (!ctx?.isLoggedIn?.()) {
+        ctx?.promptLogin?.();
+        return;
+    }
+
+    const body = messageEl.querySelector('.message-body')?.textContent || '';
+    setPendingEdit({
+        messageId: messageEl.dataset.messageId || null,
+        clientId: messageEl.dataset.clientId || null,
+        originalBody: body
+    });
+
+    const input = document.getElementById('messageInput');
+    if (input) {
+        input.value = body;
+        resizeMessageInput(input);
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+    }
+}
+
+function renderEditComposerBar() {
+    const slot = document.getElementById('editComposerSlot');
+    if (!slot) return;
+
+    slot.replaceChildren();
+    if (!pendingEdit) return;
+
+    const bar = document.createElement('div');
+    bar.id = 'editComposerBar';
+    bar.className = 'quote-composer-bar edit-composer-bar';
+
+    const accent = document.createElement('div');
+    accent.className = 'quote-composer-accent';
+
+    const content = document.createElement('div');
+    content.className = 'quote-composer-content';
+
+    const author = document.createElement('div');
+    author.className = 'quote-composer-author';
+    author.textContent = 'Mesajı düzenle';
+
+    const preview = document.createElement('div');
+    preview.className = 'quote-composer-preview';
+    preview.textContent = 'Değişiklikleri kaydetmek için Kaydet\'e basın.';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'quote-composer-close';
+    closeBtn.setAttribute('aria-label', 'Düzenlemeyi iptal et');
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', () => {
+        clearPendingEdit();
+        const input = document.getElementById('messageInput');
+        if (input) {
+            input.value = '';
+            resizeMessageInput(input);
+        }
+    });
+
+    content.append(author, preview);
+    bar.append(accent, content, closeBtn);
+    slot.appendChild(bar);
+}
+
 function showContextMenuForMessage(messageEl, clientX, clientY) {
     contextMenuDismissUntil = Date.now() + 500;
 
@@ -603,11 +725,25 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
         }
     }));
 
+    if (canEditMessage(messageEl)) {
+        menu.appendChild(createContextMenuItem({
+            icon: '✎',
+            label: 'Düzenle',
+            onClick: () => {
+                if (!ctx?.isLoggedIn?.()) {
+                    ctx?.promptLogin?.();
+                    return;
+                }
+                startEditMessage(messageEl);
+            }
+        }));
+    }
+
     appendContextDivider(menu);
 
     menu.appendChild(createContextMenuItem({
         icon: '🗑',
-        label: 'Sil',
+        label: 'Benden sil',
         danger: true,
         onClick: () => {
             if (!ctx?.isLoggedIn?.()) {
@@ -617,9 +753,27 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
             onDeleteMessages?.([{
                 messageId: messageEl.dataset.messageId || null,
                 clientId: messageEl.dataset.clientId || null
-            }]);
+            }], 'me');
         }
     }));
+
+    if (messageEl.classList.contains('outgoing')) {
+        menu.appendChild(createContextMenuItem({
+            icon: '🗑',
+            label: 'Herkesten sil',
+            danger: true,
+            onClick: () => {
+                if (!ctx?.isLoggedIn?.()) {
+                    ctx?.promptLogin?.();
+                    return;
+                }
+                onDeleteMessages?.([{
+                    messageId: messageEl.dataset.messageId || null,
+                    clientId: messageEl.dataset.clientId || null
+                }], 'everyone');
+            }
+        }));
+    }
 
     appendContextDivider(menu);
 
@@ -788,6 +942,18 @@ export function initMessageInteractions({
             messageId: bar.dataset.quoteMessageId || null,
             clientId: bar.dataset.quoteClientId || null
         });
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !pendingEdit) return;
+        const input = document.getElementById('messageInput');
+        if (document.activeElement !== input) return;
+        event.preventDefault();
+        clearPendingEdit();
+        if (input) {
+            input.value = '';
+            resizeMessageInput(input);
+        }
     });
 
     messageContainer.addEventListener('click', (event) => {

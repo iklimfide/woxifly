@@ -260,6 +260,7 @@ export function createMessageElement({
     messageId = null,
     quote = null,
     reactions = null,
+    editedAt = null,
     showSender = true,
     showQuoteAuthor = true,
     viewerUserId = null,
@@ -387,7 +388,8 @@ export function createMessageElement({
 
     const metaEl = document.createElement('span');
     metaEl.className = 'message-meta';
-    metaEl.textContent = time;
+    metaEl.textContent = editedAt ? `${time} · düzenlendi` : time;
+    if (editedAt) wrapper.dataset.editedAt = editedAt;
 
     const hasTextBody = !!bodyWrap.querySelector('.message-body');
     if (hasTextBody) {

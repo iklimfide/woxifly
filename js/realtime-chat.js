@@ -69,7 +69,7 @@ export function syncDmNotificationRooms(supabase, conversationIds, { activeConve
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  */
-export function joinDmRoom(supabase, conversationId, { userId, username, onMessage, onPresence, onReaction, onDelete }) {
+export function joinDmRoom(supabase, conversationId, { userId, username, onMessage, onPresence, onReaction, onDelete, onEdit }) {
     supabaseClient = supabase;
     const roomKey = `dm:${conversationId}`;
     if (activeRoomKey === roomKey) return activeChannel;
@@ -95,6 +95,9 @@ export function joinDmRoom(supabase, conversationId, { userId, username, onMessa
         })
         .on('broadcast', { event: 'message_delete' }, ({ payload }) => {
             onDelete?.(payload);
+        })
+        .on('broadcast', { event: 'message_edit' }, ({ payload }) => {
+            onEdit?.(payload);
         })
         .on('presence', { event: 'sync' }, () => onPresence?.(countPresence(channel)))
         .subscribe(async (status) => {
@@ -152,6 +155,25 @@ export async function broadcastMessageDelete(payload) {
         ]);
     } catch (err) {
         console.error('Silme yayını gönderilemedi:', err);
+    }
+}
+
+export async function broadcastMessageEdit(payload) {
+    if (!activeChannel) return;
+
+    try {
+        await Promise.race([
+            activeChannel.send({
+                type: 'broadcast',
+                event: 'message_edit',
+                payload
+            }),
+            new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Düzenleme yayını zaman aşımı')), 5000);
+            })
+        ]);
+    } catch (err) {
+        console.error('Düzenleme yayını gönderilemedi:', err);
     }
 }
 

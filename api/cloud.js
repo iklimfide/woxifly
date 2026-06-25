@@ -198,6 +198,83 @@ async function handleConversations(client, query, res) {
     });
 }
 
+function escapeIlike(value) {
+    return String(value || '').replace(/[%_\\]/g, '\\$&');
+}
+
+async function loadEmailsForUserIds(client, userIds) {
+    const emailById = new Map();
+    if (!userIds.length) return emailById;
+
+    const results = await Promise.all(
+        userIds.map(async (userId) => {
+            try {
+                const { data, error } = await client.auth.admin.getUserById(userId);
+                if (error || !data?.user?.email) return null;
+                return [userId, data.user.email];
+            } catch {
+                return null;
+            }
+        })
+    );
+
+    for (const entry of results) {
+        if (entry) emailById.set(entry[0], entry[1]);
+    }
+
+    return emailById;
+}
+
+function memberLocation(profile) {
+    const district = profile.current_district || profile.district || '';
+    if (district === 'Yurtdışı' && profile.abroad_city) {
+        return `Yurtdışı · ${profile.abroad_city}`;
+    }
+    return district || '—';
+}
+
+async function handleMembers(client, query, res) {
+    const search = (query.q || '').trim();
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 100);
+    const offset = Math.max(parseInt(query.offset, 10) || 0, 0);
+
+    let profileQuery = client
+        .from('profiles')
+        .select('id, username, district, current_district, abroad_city, created_at, is_visible, avatar_url', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+    if (search) {
+        const term = escapeIlike(search);
+        profileQuery = profileQuery.or(
+            `username.ilike.%${term}%,district.ilike.%${term}%,current_district.ilike.%${term}%,abroad_city.ilike.%${term}%`
+        );
+    }
+
+    const { data: profiles, error, count } = await profileQuery;
+    if (error) {
+        sendJson(res, 500, { error: error.message });
+        return;
+    }
+
+    const list = profiles || [];
+    const emailById = await loadEmailsForUserIds(client, list.map((item) => item.id));
+
+    sendJson(res, 200, {
+        members: list.map((profile) => ({
+            id: profile.id,
+            username: profile.username || 'Kullanıcı',
+            location: memberLocation(profile),
+            email: emailById.get(profile.id) || null,
+            createdAt: profile.created_at,
+            isVisible: profile.is_visible !== false,
+            avatarUrl: profile.avatar_url || null
+        })),
+        total: typeof count === 'number' ? count : null,
+        hasMore: list.length === limit
+    });
+}
+
 async function handleMessages(client, query, res) {
     const conversationId = (query.conversationId || '').trim();
     if (!conversationId) {
@@ -327,6 +404,11 @@ export default async function handler(req, res) {
 
     if (action === 'messages') {
         await handleMessages(service.client, req.query || {}, res);
+        return;
+    }
+
+    if (action === 'members') {
+        await handleMembers(service.client, req.query || {}, res);
         return;
     }
 
