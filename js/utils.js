@@ -454,3 +454,20 @@ export function initPasswordVisibilityToggles(root = document) {
         });
     });
 }
+
+export function initPinVisibilityToggles(root = document) {
+    root.querySelectorAll('.pin-field').forEach((field) => {
+        const input = field.querySelector('input');
+        const btn = field.querySelector('.password-toggle-btn');
+        if (!input || !btn || btn.dataset.pinToggleBound) return;
+
+        btn.dataset.pinToggleBound = '1';
+        btn.addEventListener('click', () => {
+            const masked = input.classList.contains('pin-input--masked');
+            input.classList.toggle('pin-input--masked', !masked);
+            btn.classList.toggle('is-revealed', masked);
+            btn.setAttribute('aria-label', masked ? 'PIN\'i gizle' : 'PIN\'i göster');
+            btn.setAttribute('aria-pressed', masked ? 'true' : 'false');
+        });
+    });
+}

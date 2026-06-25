@@ -6,6 +6,8 @@ import { initLinkViewer } from './link-viewer.js';
 import {
     initViewer,
     initComposer,
+    resetMessageInput,
+    resizeMessageInput,
     uploadMediaFile,
     isValidMediaUrl,
     toMediaUrl,
@@ -34,7 +36,7 @@ import {
     broadcastReaction,
     broadcastMessageDelete
 } from './realtime-chat.js';
-import { sanitizeText, isValidUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles, appendMessageToContainer, createMessageDateSeparator, getCalendarDayKey } from './utils.js';
+import { sanitizeText, isValidUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles, initPinVisibilityToggles, appendMessageToContainer, createMessageDateSeparator, getCalendarDayKey } from './utils.js';
 import {
     startVoiceRecording,
     stopVoiceRecording,
@@ -62,12 +64,14 @@ import {
 } from './notification-center.js';
 import {
     initPushNotifications,
+    ensurePushSubscription,
+    finalizePushInit,
+    describePushStatus,
     getPushSubscriptionState,
     enablePushNotifications,
     disablePushNotifications,
     notifyPushRecipients,
     syncPushEnabledFromProfile,
-    finalizePushInit,
     parseNotificationRoute,
     parseNotifyQueryParam,
     clearNotifyQueryParam,
@@ -143,6 +147,12 @@ let currentActiveChat = null;
 let currentConversationId = null;
 let profileReadyPromise = Promise.resolve();
 let messageHistoryLoadId = 0;
+let messageHistoryHasMore = false;
+let messageHistoryOldestAt = null;
+let messageHistoryLoadingOlder = false;
+
+const MESSAGE_HISTORY_SELECT =
+    'id, body, created_at, sender_id, sender_username, content_type, media_url, r2_key, client_id, quote';
 const dmConversations = new Map();
 const dmTitles = new Map();
 let mostRecentDmChat = null;
@@ -750,6 +760,8 @@ function updateMessageInputState() {
         input.blur();
         promptLogin();
     };
+
+    resizeMessageInput(input);
 }
 
 function isMobileLayout() {
@@ -820,7 +832,7 @@ window.switchView = function (panelId, { skipRouteSave = false } = {}) {
     if (panelId === 'profile-panel') {
         updatePushStatusUI();
         ensureHmProfileControls();
-        initPasswordVisibilityToggles(document.getElementById('hmPinGroup'));
+        initPinVisibilityToggles(document.getElementById('hmPinGroup'));
         updateProfileShareLink();
     }
     closeTopbarMenus();
@@ -830,10 +842,6 @@ window.switchView = function (panelId, { skipRouteSave = false } = {}) {
         updateSelectionBarUi(0);
     }
     if (!skipRouteSave) saveAppRoute();
-};
-
-window.checkEnter = function (event) {
-    if (event.key === 'Enter') sendMessage();
 };
 
 window.saveProfile = saveProfile;
@@ -925,8 +933,9 @@ async function loadProfile() {
     refreshAvatarDisplays();
     refreshTopbarMenu();
     updateMessageInputState();
-    updatePushStatusUI();
-    void syncPushEnabledFromProfile();
+    await syncPushEnabledFromProfile();
+    await ensurePushSubscription().catch(() => {});
+    await updatePushStatusUI();
     await refreshCloudAdminStatus();
     refreshTopbarMenu();
 }
@@ -1321,8 +1330,9 @@ function notifyIncomingDmMessage(payload, conversationId) {
     const chatId = partnerUserId ? `User-${partnerUserId}` : currentActiveChat;
     if (!chatId?.startsWith('User-')) return;
 
+    const chatPanelActive = document.getElementById('chat-panel')?.classList.contains('active');
     const notifyOpts = {
-        viewingConversationId: currentConversationId,
+        viewingConversationId: chatPanelActive ? currentConversationId : null,
         messageConversationId: conversationId
     };
 
@@ -1388,54 +1398,208 @@ function isActiveMessageHistoryLoad(loadId, conversationId) {
     return loadId === messageHistoryLoadId && conversationId === currentConversationId;
 }
 
-function renderMessageHistoryRows(container, ordered, { profileMap = {}, reactionsByMessage = new Map() } = {}) {
+function createMessageHistoryElement(msg, { profileMap = {}, reactionsByMessage = new Map() } = {}) {
+    const senderName = msg.sender_username || profileMap[msg.sender_id] || 'Kullanıcı';
+    const isOutgoing = msg.sender_id === currentUserId;
+    const messageEl = createMessageElement({
+        sender: senderName,
+        body: msg.body || '',
+        time: formatTime(msg.created_at),
+        isOutgoing,
+        senderId: isOutgoing ? null : msg.sender_id,
+        contentType: msg.content_type || 'text',
+        mediaUrl: resolveMessageMediaUrl(msg.media_url, msg.r2_key),
+        mediaR2Key: msg.r2_key,
+        messageId: msg.id,
+        clientId: msg.client_id || null,
+        quote: msg.quote || null,
+        reactions: reactionsMapToList(reactionsByMessage.get(msg.id)),
+        onSenderClick: isOutgoing ? null : messageClickHandler(),
+        showSender: false,
+        showQuoteAuthor: false,
+        viewerUserId: currentUserId,
+        viewerUsername: currentMyUsername
+    });
+    const dayKey = getCalendarDayKey(msg.created_at);
+    if (dayKey) messageEl.dataset.dayKey = dayKey;
+    return messageEl;
+}
+
+function fixPrependedDateSeparatorBoundary(container, prependedCount, lastPrependedDayKey) {
+    if (!prependedCount || !lastPrependedDayKey) return;
+
+    const allMessages = container.querySelectorAll('.message');
+    const boundaryMsg = allMessages[prependedCount];
+    if (!boundaryMsg || boundaryMsg.dataset.dayKey !== lastPrependedDayKey) return;
+
+    const prev = boundaryMsg.previousElementSibling;
+    if (prev?.classList.contains('message-date-separator') && prev.dataset.dayKey === lastPrependedDayKey) {
+        prev.remove();
+    }
+}
+
+function renderMessageHistoryRows(container, ordered, {
+    profileMap = {},
+    reactionsByMessage = new Map(),
+    prepend = false,
+    autoScroll = !prepend
+} = {}) {
     clearMessagePlaceholders(container);
 
     if (!ordered.length) {
-        showEmptyChat();
+        if (!prepend) showEmptyChat();
         return;
     }
 
     let lastDayKey = null;
+    const fragment = document.createDocumentFragment();
 
     ordered.forEach((msg) => {
         const dayKey = getCalendarDayKey(msg.created_at);
         if (dayKey && dayKey !== lastDayKey) {
-            container.appendChild(createMessageDateSeparator(msg.created_at));
+            fragment.appendChild(createMessageDateSeparator(msg.created_at));
             lastDayKey = dayKey;
         }
-
-        const senderName = msg.sender_username || profileMap[msg.sender_id] || 'Kullanıcı';
-        const isOutgoing = msg.sender_id === currentUserId;
-        const messageEl = createMessageElement({
-            sender: senderName,
-            body: msg.body || '',
-            time: formatTime(msg.created_at),
-            isOutgoing,
-            senderId: isOutgoing ? null : msg.sender_id,
-            contentType: msg.content_type || 'text',
-            mediaUrl: resolveMessageMediaUrl(msg.media_url, msg.r2_key),
-            mediaR2Key: msg.r2_key,
-            messageId: msg.id,
-            clientId: msg.client_id || null,
-            quote: msg.quote || null,
-            reactions: reactionsMapToList(reactionsByMessage.get(msg.id)),
-            onSenderClick: isOutgoing ? null : messageClickHandler(),
-            showSender: false,
-            showQuoteAuthor: false,
-            viewerUserId: currentUserId,
-            viewerUsername: currentMyUsername
-        });
-        if (dayKey) messageEl.dataset.dayKey = dayKey;
-        container.appendChild(messageEl);
+        fragment.appendChild(createMessageHistoryElement(msg, { profileMap, reactionsByMessage }));
     });
 
-    container.scrollTop = container.scrollHeight;
+    if (prepend) {
+        const prevScrollHeight = container.scrollHeight;
+        const prependedCount = ordered.length;
+        const lastPrependedDayKey = getCalendarDayKey(ordered[ordered.length - 1].created_at);
+        container.insertBefore(fragment, container.firstChild);
+        fixPrependedDateSeparatorBoundary(container, prependedCount, lastPrependedDayKey);
+        container.scrollTop = container.scrollHeight - prevScrollHeight;
+    } else {
+        container.appendChild(fragment);
+        if (autoScroll) container.scrollTop = container.scrollHeight;
+    }
+
     refreshSelectionUi(container);
+}
+
+async function fetchMessageHistoryBatch(conversationId, { before = null } = {}) {
+    let query = supabase
+        .from('messages')
+        .select(MESSAGE_HISTORY_SELECT)
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: false })
+        .limit(MESSAGE_HISTORY_LIMIT);
+
+    if (before) query = query.lt('created_at', before);
+
+    const { data: messages, error } = await query;
+    if (error) throw error;
+
+    const ordered = [...(messages || [])].reverse();
+    const senderIds = [...new Set(ordered.filter((m) => !m.sender_username).map((m) => m.sender_id))];
+    const messageIds = ordered.map((m) => m.id);
+
+    const [profilesResult, reactionsResult] = await Promise.all([
+        senderIds.length
+            ? supabase.from('profiles').select('id, username').in('id', senderIds)
+            : Promise.resolve({ data: [], error: null }),
+        messageIds.length
+            ? supabase
+                .from('message_reactions')
+                .select('message_id, user_id, emoji')
+                .in('message_id', messageIds)
+            : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (profilesResult.error) throw profilesResult.error;
+    if (reactionsResult.error) throw reactionsResult.error;
+
+    return {
+        ordered,
+        profileMap: Object.fromEntries((profilesResult.data || []).map((p) => [p.id, p.username])),
+        reactionRows: reactionsResult.data || [],
+        hasMore: (messages || []).length === MESSAGE_HISTORY_LIMIT
+    };
+}
+
+function setOlderMessagesLoading(visible) {
+    const container = document.getElementById('messageContainer');
+    if (!container) return;
+
+    const existing = container.querySelector('[data-older-loading]');
+    if (!visible) {
+        existing?.remove();
+        return;
+    }
+    if (existing) return;
+
+    const indicator = document.createElement('div');
+    indicator.dataset.olderLoading = 'true';
+    indicator.className = 'message-older-loading';
+    indicator.setAttribute('role', 'status');
+    indicator.setAttribute('aria-label', 'Eski mesajlar yükleniyor');
+    indicator.textContent = 'Eski mesajlar yükleniyor…';
+    container.insertBefore(indicator, container.firstChild);
+}
+
+async function loadOlderMessageHistory() {
+    const conversationId = currentConversationId;
+    if (!conversationId || !messageHistoryHasMore || messageHistoryLoadingOlder) return;
+
+    messageHistoryLoadingOlder = true;
+    setOlderMessagesLoading(true);
+
+    try {
+        const batch = await fetchMessageHistoryBatch(conversationId, {
+            before: messageHistoryOldestAt
+        });
+
+        if (conversationId !== currentConversationId) return;
+        if (!batch.ordered.length) {
+            messageHistoryHasMore = false;
+            return;
+        }
+
+        messageHistoryHasMore = batch.hasMore;
+        messageHistoryOldestAt = batch.ordered[0].created_at;
+
+        const container = document.getElementById('messageContainer');
+        const reactionsByMessage = aggregateReactions(batch.reactionRows, currentUserId);
+        renderMessageHistoryRows(container, batch.ordered, {
+            profileMap: batch.profileMap,
+            reactionsByMessage,
+            prepend: true
+        });
+
+        const cached = getCachedMessageHistory(currentUserId, conversationId);
+        if (cached?.messages?.length) {
+            setCachedMessageHistory(currentUserId, conversationId, {
+                messages: [...batch.ordered, ...cached.messages],
+                reactionRows: [...batch.reactionRows, ...(cached.reactionRows || [])]
+            });
+        }
+    } catch (err) {
+        console.error('[woxifly] loadOlderMessageHistory failed:', err);
+    } finally {
+        messageHistoryLoadingOlder = false;
+        setOlderMessagesLoading(false);
+    }
+}
+
+function initMessageHistoryScroll() {
+    const container = document.getElementById('messageContainer');
+    if (!container || container.dataset.historyScrollBound) return;
+    container.dataset.historyScrollBound = 'true';
+
+    container.addEventListener('scroll', () => {
+        if (container.scrollTop < 100 && messageHistoryHasMore && !messageHistoryLoadingOlder) {
+            void loadOlderMessageHistory();
+        }
+    }, { passive: true });
 }
 
 async function loadMessageHistory(conversationId) {
     const loadId = ++messageHistoryLoadId;
+    messageHistoryHasMore = false;
+    messageHistoryOldestAt = null;
+    messageHistoryLoadingOlder = false;
+
     const container = document.getElementById('messageContainer');
     clearMessageContainer(container);
 
@@ -1443,6 +1607,10 @@ async function loadMessageHistory(conversationId) {
     let showedCache = false;
     if (cached?.messages?.length) {
         showedCache = true;
+        messageHistoryOldestAt = cached.messages[0].created_at;
+        if (cached.messages.length >= MESSAGE_HISTORY_LIMIT) {
+            messageHistoryHasMore = true;
+        }
         renderMessageHistoryRows(container, cached.messages, {
             reactionsByMessage: aggregateReactions(cached.reactionRows || [], currentUserId)
         });
@@ -1451,55 +1619,56 @@ async function loadMessageHistory(conversationId) {
     }
 
     try {
-        const { data: messages, error } = await supabase
-            .from('messages')
-            .select('id, body, created_at, sender_id, sender_username, content_type, media_url, r2_key, client_id, quote')
-            .eq('conversation_id', conversationId)
-            .order('created_at', { ascending: false })
-            .limit(MESSAGE_HISTORY_LIMIT);
+        const batch = await fetchMessageHistoryBatch(conversationId);
 
         if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
-        if (error) throw error;
 
-        if (!messages || messages.length === 0) {
+        if (!batch.ordered.length) {
             clearCachedMessageHistory(currentUserId, conversationId);
             clearMessageContainer(container);
             showEmptyChat();
             return;
         }
 
-        const ordered = [...messages].reverse();
-        const senderIds = [...new Set(ordered.filter((m) => !m.sender_username).map((m) => m.sender_id))];
-        const messageIds = ordered.map((m) => m.id);
+        messageHistoryHasMore = batch.hasMore;
+        messageHistoryOldestAt = batch.ordered[0].created_at;
 
-        const [profilesResult, reactionsResult] = await Promise.all([
-            senderIds.length
-                ? supabase.from('profiles').select('id, username').in('id', senderIds)
-                : Promise.resolve({ data: [], error: null }),
-            messageIds.length
-                ? supabase
-                    .from('message_reactions')
-                    .select('message_id, user_id, emoji')
-                    .in('message_id', messageIds)
-                : Promise.resolve({ data: [], error: null })
-        ]);
+        const oldestFresh = batch.ordered[0].created_at;
+        const olderCached = (cached?.messages || []).filter((m) => m.created_at < oldestFresh);
+        const mergedOrdered = olderCached.length
+            ? [...olderCached, ...batch.ordered]
+            : batch.ordered;
 
-        if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
-        if (profilesResult.error) throw profilesResult.error;
-        if (reactionsResult.error) throw reactionsResult.error;
+        if (olderCached.length >= MESSAGE_HISTORY_LIMIT) {
+            messageHistoryHasMore = true;
+        }
+        if (mergedOrdered.length) {
+            messageHistoryOldestAt = mergedOrdered[0].created_at;
+        }
 
-        const profileMap = Object.fromEntries((profilesResult.data || []).map((p) => [p.id, p.username]));
-        const reactionsByMessage = aggregateReactions(reactionsResult.data || [], currentUserId);
-        const reactionRows = reactionsResult.data || [];
+        const cachedReactionRows = cached?.reactionRows || [];
+        const mergedReactionRows = olderCached.length
+            ? [
+                ...cachedReactionRows.filter((row) =>
+                    olderCached.some((m) => m.id === row.message_id)
+                ),
+                ...batch.reactionRows
+            ]
+            : batch.reactionRows;
+
+        const reactionsByMessage = aggregateReactions(mergedReactionRows, currentUserId);
 
         if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
 
         container.querySelectorAll('.message, .message-date-separator').forEach((el) => el.remove());
-        renderMessageHistoryRows(container, ordered, { profileMap, reactionsByMessage });
+        renderMessageHistoryRows(container, mergedOrdered, {
+            profileMap: batch.profileMap,
+            reactionsByMessage
+        });
 
         setCachedMessageHistory(currentUserId, conversationId, {
-            messages: ordered,
-            reactionRows
+            messages: mergedOrdered,
+            reactionRows: mergedReactionRows
         });
     } catch (err) {
         if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
@@ -1998,7 +2167,7 @@ async function stageComposerMedia(file, kind) {
 
     if (usesMediaSendModal(kind)) {
         openMediaSendModal({ kind, previewUrl, caption: draftCaption });
-        if (input) input.value = '';
+        resetMessageInput();
     } else {
         renderMediaComposerBar();
         input?.focus();
@@ -2215,13 +2384,13 @@ async function sendMessage() {
     try {
         if (hasPendingMedia) {
             clearPendingQuote();
-            if (input) input.value = '';
+            resetMessageInput();
             await dispatchPendingComposerMediaBatch(body, quote);
             return;
         }
 
         clearPendingQuote();
-        if (input) input.value = '';
+        resetMessageInput();
         await dispatchOutgoingMessage({ body, contentType: 'text', quote });
     } catch (err) {
         showNotify(err.message || 'Mesaj gönderilemedi.', {
@@ -2652,8 +2821,9 @@ async function refreshSessionState() {
         currentUserId = session.user.id;
         closeWelcomeModal();
         setNotificationUser(currentUserId);
-        profileReadyPromise = loadProfile();
-        await profileReadyPromise;
+        await loadProfile();
+        await ensurePushSubscription().catch(() => {});
+        await updatePushStatusUI();
         document.getElementById('myActiveChatsList').innerHTML = '';
         await loadDmHistory();
 
@@ -2697,7 +2867,10 @@ async function initDashboard() {
     bootstrapAppUi();
 
     runInitStep('initSeo', initSeo);
-    runInitStep('initPasswordVisibilityToggles', () => initPasswordVisibilityToggles());
+    runInitStep('initPasswordVisibilityToggles', () => {
+        initPasswordVisibilityToggles();
+        initPinVisibilityToggles();
+    });
     runInitStep('initHmCamouflage', initHmCamouflage);
     runInitStep('initLinkViewer', initLinkViewer);
     runInitStep('initViewer', initViewer);
@@ -2724,6 +2897,7 @@ async function initDashboard() {
         );
     }
     runInitStep('initMediaComposer', initMediaComposer);
+    runInitStep('initMessageHistoryScroll', initMessageHistoryScroll);
     runInitStep('initMessageInteractions', () => initMessageInteractions({
         messageContainer: document.getElementById('messageContainer'),
         isLoggedIn,
@@ -2759,12 +2933,10 @@ async function initDashboard() {
             void refreshCloudAdminStatus().then(() => refreshTopbarMenu());
         }
     });
-    bootstrapAppUi();
 
-    const pushInitPromise = initPushNotifications()
-        .then(() => finalizePushInit())
-        .then(() => updatePushStatusUI())
-        .catch(() => updatePushStatusUI());
+    await initPushNotifications().catch((err) => {
+        console.warn('[woxifly] Push init failed:', err);
+    });
 
     const session = await getSession();
 
@@ -2774,6 +2946,8 @@ async function initDashboard() {
         setNotificationUser(currentUserId);
         profileReadyPromise = loadProfile();
         await profileReadyPromise;
+        await finalizePushInit().catch(() => {});
+        await updatePushStatusUI();
         await refreshCloudAdminStatus();
         document.getElementById('myActiveChatsList').innerHTML = '';
         await loadDmHistory();
@@ -2782,6 +2956,7 @@ async function initDashboard() {
         setNotificationUser(null);
         resetCloudPanel();
         maybeShowWelcomeModal();
+        await finalizePushInit().catch(() => {});
     }
 
     syncAuthGateUi();
@@ -2827,7 +3002,6 @@ async function initDashboard() {
     });
 
     syncTopbarMenuIcon();
-    void pushInitPromise;
 }
 
 function triggerPushForMessage(conversationId) {
@@ -2860,8 +3034,10 @@ function initPushControls() {
             if (after.pushEnabled && !before.pushEnabled) {
                 showNotify(
                     after.subscribed
-                        ? 'Bildirimler açıldı. Masaüstünde arka planda da uyarı alırsınız.'
-                        : 'Bildirimler açıldı. Sekme açıkken masaüstü uyarıları alırsınız.',
+                        ? 'Bildirimler açıldı. Uygulama kapalıyken de uyarı alırsınız.'
+                        : after.foregroundOnly
+                            ? 'Bildirimler açıldı. Sekme açıkken uyarı alırsınız; arka plan için tarayıcı izni ve sunucu ayarı gerekir.'
+                            : 'Bildirimler açıldı. Tarayıcıdan bildirim izni vermeniz gerekebilir.',
                     { title: 'Bildirimler', type: 'info' }
                 );
             } else if (!after.pushEnabled && before.pushEnabled) {
@@ -2889,9 +3065,11 @@ function initPushControls() {
 async function updatePushStatusUI() {
     const onRadio = document.getElementById('pushRadioOn');
     const offRadio = document.getElementById('pushRadioOff');
+    const statusEl = document.getElementById('pushStatusHint');
     if (!onRadio || !offRadio) return;
 
     const state = await getPushSubscriptionState();
+    const status = describePushStatus(state);
 
     onRadio.checked = state.pushEnabled;
     offRadio.checked = !state.pushEnabled;
@@ -2899,6 +3077,12 @@ async function updatePushStatusUI() {
     const unsupported = !isPushSupported();
     onRadio.disabled = unsupported || (state.permission === 'denied' && !state.pushEnabled);
     offRadio.disabled = unsupported;
+
+    if (statusEl) {
+        statusEl.textContent = status.text;
+        statusEl.className = status.className;
+        statusEl.hidden = !status.text;
+    }
 }
 
 async function openChatFromNotification(route) {

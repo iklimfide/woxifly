@@ -21,5 +21,5 @@ export {
     isMediaSendModalOpen,
     setMediaSendUploadState
 } from './send-modal.js';
-export { initComposer, sendMediaFile, uploadMediaFile, kindFromFile as fileKind } from './composer.js';
+export { initComposer, sendMediaFile, uploadMediaFile, kindFromFile as fileKind, resetMessageInput, resizeMessageInput } from './composer.js';
 export { compressImageForChat, compressImageForAvatar, compressImageFile } from './compress-image.js';

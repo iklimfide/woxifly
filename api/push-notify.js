@@ -87,10 +87,27 @@ export default async function handler(req, res) {
         return;
     }
 
+    const { data: enabledProfiles, error: enabledError } = await service.client
+        .from('profiles')
+        .select('id')
+        .in('id', recipientIds)
+        .eq('push_enabled', true);
+
+    if (enabledError) {
+        res.status(500).json({ error: enabledError.message });
+        return;
+    }
+
+    const enabledRecipientIds = (enabledProfiles || []).map((profile) => profile.id);
+    if (!enabledRecipientIds.length) {
+        res.status(200).json({ ok: true, sent: 0 });
+        return;
+    }
+
     const { data: subscriptions } = await service.client
         .from('push_subscriptions')
         .select('endpoint, p256dh, auth_key, user_id')
-        .in('user_id', recipientIds);
+        .in('user_id', enabledRecipientIds);
 
     if (!subscriptions?.length) {
         res.status(200).json({ ok: true, sent: 0 });

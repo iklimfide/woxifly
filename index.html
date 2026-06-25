@@ -513,6 +513,14 @@
             0% { background-position: 100% 0; }
             100% { background-position: -100% 0; }
         }
+
+        .message-older-loading {
+            align-self: center;
+            padding: 6px 12px;
+            font-size: 0.72rem;
+            color: #64748b;
+            flex-shrink: 0;
+        }
         
         .message { width: fit-content; max-width: min(88vw, 340px); font-size: 17px; line-height: 1.35; word-break: break-word; overflow-wrap: anywhere; }
         .message-frame {
@@ -961,7 +969,7 @@
 
         .input-composer-row {
             display: flex;
-            align-items: center;
+            align-items: flex-end;
             gap: 8px;
             width: 100%;
             min-width: 0;
@@ -970,16 +978,23 @@
         .input-composer-row input[type="file"] {
             display: none;
         }
-        .input-area input#messageInput {
+        .input-area textarea#messageInput {
             flex: 1;
             min-width: 0;
+            min-height: 48px;
+            max-height: 120px;
             background-color: #fff;
             border: none;
-            padding: 10px 14px;
+            padding: 12px 14px;
             border-radius: 24px;
             outline: none;
             font-size: 16px;
+            line-height: 1.35;
+            font-family: inherit;
+            box-sizing: border-box;
             box-shadow: inset 0 0 0 1px #e2e8f0;
+            resize: none;
+            overflow-y: hidden;
         }
         .send-btn, .save-btn {
             background-color: var(--accent-color);
@@ -1028,6 +1043,65 @@
             background: #fee2e2;
             color: #dc2626;
             animation: mic-pulse 1s ease-in-out infinite;
+        }
+
+        .attach-menu-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1200;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 12px 12px calc(12px + var(--safe-bottom));
+            background: rgba(15, 23, 42, 0.45);
+        }
+
+        .attach-menu-overlay[hidden] {
+            display: none !important;
+        }
+
+        .attach-menu-sheet {
+            width: min(100%, 420px);
+            background: #fff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+        }
+
+        .attach-menu-option {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            padding: 16px 18px;
+            border: none;
+            border-bottom: 1px solid #f1f5f9;
+            background: #fff;
+            font: inherit;
+            font-size: 1rem;
+            color: #0f172a;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .attach-menu-option:last-child {
+            border-bottom: none;
+        }
+
+        .attach-menu-option:active {
+            background: #f8fafc;
+        }
+
+        .attach-menu-option-icon {
+            font-size: 1.35rem;
+            line-height: 1;
+            width: 1.5rem;
+            text-align: center;
+        }
+
+        .attach-menu-cancel {
+            color: #64748b;
+            font-weight: 600;
         }
 
         .input-area.is-recording {
@@ -1607,6 +1681,21 @@
         .password-toggle-btn.is-revealed .icon-eye { display: none; }
 
         .password-toggle-btn.is-revealed .icon-eye-off { display: block; }
+
+        .pin-field {
+            position: relative;
+            width: 100%;
+        }
+
+        .pin-field input {
+            width: 100%;
+            padding-right: 44px;
+        }
+
+        .pin-input--masked {
+            -webkit-text-security: disc;
+            text-security: disc;
+        }
 
         .save-btn { width: 100%; margin-top: 4px; }
 
@@ -3113,12 +3202,29 @@
                     <span class="voice-recording-hint">Durdurmak için 🎤</span>
                 </div>
                 <div class="input-composer-row">
-                    <input type="file" id="fileInput" hidden accept="image/*,video/*,audio/*" multiple>
+                    <input type="file" id="fileInput" hidden accept="image/*,video/*" multiple>
+                    <div class="attach-menu-overlay" id="attachMenuOverlay" hidden>
+                        <div class="attach-menu-sheet" role="menu" aria-label="Medya ekle">
+                            <button type="button" class="attach-menu-option" data-attach-mode="image" role="menuitem">
+                                <span class="attach-menu-option-icon" aria-hidden="true">📷</span>
+                                <span>Fotoğraf</span>
+                            </button>
+                            <button type="button" class="attach-menu-option" data-attach-mode="video" role="menuitem">
+                                <span class="attach-menu-option-icon" aria-hidden="true">🎬</span>
+                                <span>Video</span>
+                            </button>
+                            <button type="button" class="attach-menu-option" data-attach-mode="gallery" role="menuitem">
+                                <span class="attach-menu-option-icon" aria-hidden="true">🖼️</span>
+                                <span>Galeri</span>
+                            </button>
+                            <button type="button" class="attach-menu-option attach-menu-cancel" data-attach-mode="cancel" role="menuitem">İptal</button>
+                        </div>
+                    </div>
                     <div class="input-tools">
                         <button type="button" class="input-icon-btn" id="attachBtn" title="Dosya ekle" aria-label="Dosya ekle">📎</button>
                         <button type="button" class="input-icon-btn" id="voiceBtn" title="Ses kaydı" aria-label="Ses kaydı">🎤</button>
                     </div>
-                    <input type="text" id="messageInput" placeholder="Mesajınızı yazın veya görsel yapıştırın..." onkeypress="checkEnter(event)">
+                    <textarea id="messageInput" rows="1" placeholder="Mesajınızı yazın veya görsel yapıştırın..." aria-label="Mesaj" autocomplete="off" autocapitalize="sentences" spellcheck="true" data-1p-ignore data-lpignore="true"></textarea>
                     <button class="send-btn" onclick="sendMessage()">Gönder</button>
                 </div>
             </div>
@@ -3139,7 +3245,7 @@
                         </div>
                         <input type="file" id="profileAvatarInput" hidden accept="image/jpeg,image/png,image/webp">
                     </div>
-                    <div class="form-group"><label>Rumuz</label><input type="text" id="usernameInput" value="Ben"></div>
+                    <div class="form-group"><label>Rumuz</label><input type="text" id="usernameInput" value="Ben" autocomplete="nickname"></div>
                     <div class="form-group profile-share-row">
                         <button type="button" class="profile-share-link" id="profileShareLink" disabled>—</button>
                         <button type="button" class="profile-share-btn" id="profileShareBtn">Paylaş</button>
@@ -3155,8 +3261,8 @@
                     </div>
                     <div class="form-group" id="hmPinGroup" hidden>
                         <label for="hmPinInput">Kilit PIN</label>
-                        <div class="password-field">
-                            <input type="password" id="hmPinInput" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Örn: 1923">
+                        <div class="pin-field">
+                            <input type="text" id="hmPinInput" class="pin-input pin-input--masked" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" maxlength="8" placeholder="Örn: 1923" data-1p-ignore data-lpignore="true">
                             <button type="button" class="password-toggle-btn" aria-label="PIN'i göster" aria-pressed="false">
                                 <svg class="icon-eye" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
                                 <svg class="icon-eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg>
@@ -3177,6 +3283,7 @@
                             <span>Kapalı</span>
                         </label>
                     </div>
+                    <p class="form-hint push-status" id="pushStatusHint" hidden></p>
 
                     <div class="form-group">
                         <label for="profileAboutInput">Hakkımda</label>

@@ -310,6 +310,12 @@ function bindProfileControls() {
     toggle.dataset.hmBound = '1';
     toggle.addEventListener('change', onHmToggleChanged);
 
+    pinInput?.addEventListener('input', () => {
+        if (!pinInput) return;
+        const digits = pinInput.value.replace(/\D/g, '').slice(0, 8);
+        if (pinInput.value !== digits) pinInput.value = digits;
+    });
+
     pinInput?.addEventListener('change', () => {
         if (!isHmEnabled()) return;
         const pin = pinInput.value.trim();

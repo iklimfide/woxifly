@@ -25,4 +25,5 @@ export function getLocationCoords() {
     return DEFAULT_COORDS;
 }
 
-export const MESSAGE_HISTORY_LIMIT = 20;
+/** Tek seferde yüklenen mesaj sayfası (yukarı kaydırınca daha eski mesajlar eklenir). */
+export const MESSAGE_HISTORY_LIMIT = 50;

@@ -197,6 +197,41 @@ export async function initPushNotifications() {
 
 export async function finalizePushInit() {
     await syncPushEnabledFromProfile().catch(() => {});
+    return ensurePushSubscription();
+}
+
+export async function ensurePushSubscription() {
+    const pushEnabled = await getPushEnabledFromProfile();
+    if (!pushEnabled) return getPushSubscriptionState();
+
+    if (!pushSupported || Notification.permission !== 'granted') {
+        return getPushSubscriptionState();
+    }
+
+    if (!webPushReady || !swRegistration?.pushManager || !vapidPublicKey) {
+        return getPushSubscriptionState();
+    }
+
+    let subscription = await swRegistration.pushManager.getSubscription();
+    if (!subscription) {
+        try {
+            subscription = await swRegistration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+            });
+        } catch (err) {
+            console.warn('Push aboneliği oluşturulamadı:', err);
+            return getPushSubscriptionState();
+        }
+    }
+
+    try {
+        await saveSubscription(subscription);
+    } catch (err) {
+        console.warn('Push aboneliği sunucuya kaydedilemedi:', err);
+    }
+
+    return getPushSubscriptionState();
 }
 
 export function getNotificationPermission() {
@@ -340,12 +375,14 @@ export function maybeShowForegroundNotification(payload, {
 } = {}) {
     if (!pushSupported || !profilePushEnabled || Notification.permission !== 'granted') return;
 
-    const viewingSameChat = viewingConversationId
+    const chatPanelActive = document.getElementById('chat-panel')?.classList.contains('active');
+    const viewingSameChat = chatPanelActive
+        && viewingConversationId
         && messageConversationId
         && viewingConversationId === messageConversationId;
     if (!document.hidden && document.hasFocus() && viewingSameChat) return;
 
-    const data = buildNotificationDataFromPayload(payload, activeChatId);
+    const data = buildNotificationDataFromPayload(payload);
     if (!data) return;
 
     const tag = buildNotificationTag(data);
@@ -446,7 +483,7 @@ export function describePushStatus({ permission, subscribed, foregroundOnly, pus
 
     if (foregroundOnly) {
         return {
-            text: 'Bildirimler açık. Sekme açıkken uyarı alırsınız.',
+            text: 'Bildirimler açık. Sekme açıkken uyarı alırsınız. Arka plan bildirimi için sunucu VAPID ayarı ve tarayıcı aboneliği gerekir.',
             className: 'push-status push-status--on',
             buttonText: 'Bildirimleri Kapat',
             disabled: false

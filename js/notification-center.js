@@ -355,11 +355,16 @@ export function closeNotificationDropdown() {
     closeNotificationMenu();
 }
 
+function isChatPanelActive() {
+    return document.getElementById('chat-panel')?.classList.contains('active') === true;
+}
+
 export function shouldCaptureInAppNotification({
     viewingConversationId = null,
     messageConversationId = null
 } = {}) {
-    const viewingSameChat = viewingConversationId
+    const viewingSameChat = isChatPanelActive()
+        && viewingConversationId
         && messageConversationId
         && viewingConversationId === messageConversationId;
     if (!viewingSameChat) return true;

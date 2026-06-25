@@ -1,6 +1,6 @@
 /* Woxifly — hafif PWA service worker (push + önbellek) */
 
-const CACHE_NAME = 'woxifly-shell-v11';
+const CACHE_NAME = 'woxifly-shell-v12';
 const SHELL_URLS = [
     '/',
     '/index.html',
@@ -89,6 +89,10 @@ async function handlePush(event) {
     } catch {
         payload = {};
     }
+
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const hasVisibleClient = clients.some((client) => client.visibilityState === 'visible');
+    if (hasVisibleClient) return;
 
     const tag = payload.tag || 'woxifly-notification';
     const existing = await self.registration.getNotifications({ tag });

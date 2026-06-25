@@ -3,6 +3,32 @@ import { kindFromFile } from './urls.js';
 import { updateMediaBlock } from './render.js';
 
 const MAX_BATCH_IMAGES = 3;
+const MESSAGE_INPUT_MAX_HEIGHT = 120;
+
+export function resizeMessageInput(el = document.getElementById('messageInput')) {
+    if (!el) return;
+    el.style.height = 'auto';
+    const nextHeight = Math.min(el.scrollHeight, MESSAGE_INPUT_MAX_HEIGHT);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > MESSAGE_INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
+}
+
+export function resetMessageInput() {
+    const el = document.getElementById('messageInput');
+    if (!el) return;
+    el.value = '';
+    resizeMessageInput(el);
+}
+
+const ATTACH_ACCEPT = {
+    image: 'image/*',
+    video: 'video/*',
+    gallery: 'image/*,video/*'
+};
+
+function isAndroidDevice() {
+    return /android/i.test(navigator.userAgent);
+}
 
 function setUploadBar(active) {
     const area = document.getElementById('messageInputArea');
@@ -158,17 +184,69 @@ export function initComposer({
 }) {
     const fileInput = document.getElementById('fileInput');
     const attachBtn = document.getElementById('attachBtn');
+    const attachMenuOverlay = document.getElementById('attachMenuOverlay');
     const voiceBtn = document.getElementById('voiceBtn');
     const messageInput = document.getElementById('messageInput');
 
     const mediaContext = { showNotify, onMediaMessage, onMediaMessageBatch };
+
+    const closeAttachMenu = () => {
+        attachMenuOverlay?.setAttribute('hidden', '');
+    };
+
+    const openAttachMenu = () => {
+        attachMenuOverlay?.removeAttribute('hidden');
+    };
+
+    const openFilePicker = ({ accept, multiple }) => {
+        if (!fileInput) return;
+        fileInput.accept = accept;
+        fileInput.multiple = !!multiple;
+        fileInput.value = '';
+        fileInput.click();
+    };
+
+    const handleAttachMode = (mode) => {
+        closeAttachMenu();
+        if (mode === 'cancel') return;
+
+        if (mode === 'image') {
+            openFilePicker({ accept: ATTACH_ACCEPT.image, multiple: true });
+            return;
+        }
+        if (mode === 'video') {
+            openFilePicker({ accept: ATTACH_ACCEPT.video, multiple: false });
+            return;
+        }
+        if (mode === 'gallery') {
+            openFilePicker({ accept: ATTACH_ACCEPT.gallery, multiple: true });
+        }
+    };
 
     attachBtn?.addEventListener('click', () => {
         if (!isLoggedIn()) {
             promptLogin();
             return;
         }
-        fileInput?.click();
+
+        if (isAndroidDevice()) {
+            openAttachMenu();
+            return;
+        }
+
+        openFilePicker({ accept: ATTACH_ACCEPT.gallery, multiple: true });
+    });
+
+    attachMenuOverlay?.addEventListener('click', (event) => {
+        if (event.target === attachMenuOverlay) {
+            closeAttachMenu();
+        }
+    });
+
+    attachMenuOverlay?.querySelectorAll('[data-attach-mode]').forEach((button) => {
+        button.addEventListener('click', () => {
+            handleAttachMode(button.dataset.attachMode);
+        });
     });
 
     fileInput?.addEventListener('change', async () => {
@@ -188,6 +266,14 @@ export function initComposer({
                 type: 'error'
             });
         }
+    });
+
+    messageInput?.addEventListener('input', () => resizeMessageInput(messageInput));
+
+    messageInput?.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+        event.preventDefault();
+        window.sendMessage?.();
     });
 
     const handlePaste = async (event) => {
@@ -212,6 +298,7 @@ export function initComposer({
     };
 
     messageInput?.addEventListener('paste', handlePaste);
+    resizeMessageInput(messageInput);
 
     if (!voiceBtn) return;
 }
