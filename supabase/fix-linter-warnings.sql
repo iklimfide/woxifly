@@ -47,6 +47,24 @@ grant execute on function public.get_or_create_group_conversation(text) to authe
 revoke all on function public.get_or_create_dm(uuid) from public, anon;
 grant execute on function public.get_or_create_dm(uuid) to authenticated;
 
+revoke all on function public.is_blocked(uuid, uuid) from public, anon;
+grant execute on function public.is_blocked(uuid, uuid) to authenticated;
+
+revoke all on function public.is_dm_partner_blocked(uuid) from public, anon;
+grant execute on function public.is_dm_partner_blocked(uuid) to authenticated;
+
+revoke all on function public.block_user(uuid) from public, anon;
+grant execute on function public.block_user(uuid) to authenticated;
+
+revoke all on function public.unblock_user(uuid) from public, anon;
+grant execute on function public.unblock_user(uuid) to authenticated;
+
+revoke all on function public.list_block_relation_ids() from public, anon;
+grant execute on function public.list_block_relation_ids() to authenticated;
+
+revoke all on function public.get_block_status(uuid) from public, anon;
+grant execute on function public.get_block_status(uuid) to authenticated;
+
 revoke all on function public.nearby_users(integer, integer) from public, anon;
 grant execute on function public.nearby_users(integer, integer) to authenticated;
 

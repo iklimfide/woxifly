@@ -16,6 +16,7 @@ let onToggleReaction = null;
 let onDeleteMessages = null;
 let onForwardMessage = null;
 let onShowNotify = null;
+let onBlockUser = null;
 let getAuthContext = null;
 let getViewerContext = () => ({ userId: null, username: null });
 let selectionMode = false;
@@ -777,6 +778,26 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
 
     appendContextDivider(menu);
 
+    if (
+        onBlockUser
+        && !messageEl.classList.contains('outgoing')
+        && messageEl.dataset.senderId
+    ) {
+        const senderName = messageEl.querySelector('.message-sender')?.textContent?.replace(/^@/, '') || 'Kullanıcı';
+        menu.appendChild(createContextMenuItem({
+            icon: '🚫',
+            label: 'Engelle',
+            danger: true,
+            onClick: () => {
+                if (!ctx?.isLoggedIn?.()) {
+                    ctx?.promptLogin?.();
+                    return;
+                }
+                onBlockUser(messageEl.dataset.senderId, senderName);
+            }
+        }));
+    }
+
     menu.appendChild(createContextMenuItem({
         icon: '☑',
         label: 'Seç',
@@ -909,7 +930,8 @@ export function initMessageInteractions({
     onDeleteMessages: onDeleteMessagesHandler,
     onSelectionChange: onSelectionChangeHandler,
     onForwardMessage: onForwardMessageHandler,
-    showNotify
+    showNotify,
+    onBlockUser: onBlockUserHandler
 }) {
     if (!messageContainer) return;
 
@@ -920,6 +942,7 @@ export function initMessageInteractions({
     onSelectionChange = onSelectionChangeHandler;
     onForwardMessage = onForwardMessageHandler;
     onShowNotify = showNotify;
+    onBlockUser = onBlockUserHandler;
     boundMessageContainer = messageContainer;
 
     let longPressTimer = null;

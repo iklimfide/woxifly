@@ -98,8 +98,28 @@ export default async function handler(req, res) {
         return;
     }
 
-    const enabledRecipientIds = (enabledProfiles || []).map((profile) => profile.id);
+    const enabledRecipientIds = (enabledProfiles || [])
+        .map((profile) => profile.id)
+        .filter((id) => id !== senderId);
+
     if (!enabledRecipientIds.length) {
+        res.status(200).json({ ok: true, sent: 0 });
+        return;
+    }
+
+    const { data: blockRows } = await service.client
+        .from('user_blocks')
+        .select('blocker_id, blocked_id')
+        .or(`blocker_id.eq.${senderId},blocked_id.eq.${senderId}`);
+
+    const blockedRecipientIds = new Set();
+    for (const row of blockRows || []) {
+        if (row.blocker_id === senderId) blockedRecipientIds.add(row.blocked_id);
+        if (row.blocked_id === senderId) blockedRecipientIds.add(row.blocker_id);
+    }
+
+    const deliverableRecipientIds = enabledRecipientIds.filter((id) => !blockedRecipientIds.has(id));
+    if (!deliverableRecipientIds.length) {
         res.status(200).json({ ok: true, sent: 0 });
         return;
     }
@@ -107,7 +127,7 @@ export default async function handler(req, res) {
     const { data: subscriptions } = await service.client
         .from('push_subscriptions')
         .select('endpoint, p256dh, auth_key, user_id')
-        .in('user_id', enabledRecipientIds);
+        .in('user_id', deliverableRecipientIds);
 
     if (!subscriptions?.length) {
         res.status(200).json({ ok: true, sent: 0 });

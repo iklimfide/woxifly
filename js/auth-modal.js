@@ -195,7 +195,6 @@ async function ensureProfile(userId, username) {
         username,
         district: DEFAULT_LOCATION,
         current_district: DEFAULT_LOCATION,
-        is_visible: false,
         updated_at: new Date().toISOString()
     }, { onConflict: 'id' });
 

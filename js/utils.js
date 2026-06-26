@@ -419,9 +419,17 @@ export function createMessageElement({
         bubbleEl.appendChild(contentEl);
     }
 
+    const actionsToggle = createMessageActionsToggle();
+
     const frameEl = document.createElement('div');
     frameEl.className = 'message-frame';
-    frameEl.append(bubbleEl, createMessageActionsToggle());
+    if (isOutgoing) {
+        bubbleEl.classList.add('message-bubble--with-actions');
+        bubbleEl.appendChild(actionsToggle);
+        frameEl.appendChild(bubbleEl);
+    } else {
+        frameEl.append(bubbleEl, actionsToggle);
+    }
     if (statusEl) frameEl.appendChild(statusEl);
 
     wrapper.appendChild(frameEl);

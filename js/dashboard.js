@@ -1,7 +1,7 @@
 import { supabase, getSession } from './supabase-client.js';
 import { initAuthModal, openAuthModal } from './auth-modal.js';
 import { initWelcomeModal, maybeShowWelcomeModal, closeWelcomeModal } from './welcome-modal.js';
-import { initNotifyModal, showNotify, showToast, closeNotifyModal } from './notify-modal.js';
+import { initNotifyModal, showNotify, showToast, showConfirmToast, closeNotifyModal } from './notify-modal.js';
 import { initLinkViewer } from './link-viewer.js';
 import {
     initViewer,
@@ -104,7 +104,8 @@ import {
     getSelectedMessageKeys,
     isSelectionMode,
     refreshSelectionUi,
-    removeMessagesFromDom
+    removeMessagesFromDom,
+    scrollToQuotedMessage
 } from './message-interactions.js';
 import {
     getCachedMessageHistory,
@@ -138,6 +139,17 @@ import {
     isCloudAdminUser,
     resetCloudPanel
 } from './cloud-panel.js';
+import {
+    refreshBlockedRelations,
+    clearBlockedRelations,
+    isUserBlocked,
+    fetchBlockStatus,
+    fetchBlockedByMeList,
+    blockUser,
+    unblockUser,
+    isBlockError
+} from './user-blocks.js';
+import { initSearchPanel, openSearchPanel, closeSearchPanel } from './search-panel.js';
 
 let currentUserId = null;
 let pendingForward = null;
@@ -215,6 +227,12 @@ async function openDmByUserId(userId, usernameHint = null, avatarUrl = null) {
         return;
     }
 
+    if (isUserBlocked(userId)) {
+        showNotify('Bu kullanıcıyla mesajlaşamazsınız.', { title: 'Engel', type: 'warning' });
+        await showChatListHome();
+        return;
+    }
+
     let username = usernameHint || dmTitles.get(userId);
 
     if (!username) {
@@ -242,6 +260,9 @@ async function openDmByUserId(userId, usernameHint = null, avatarUrl = null) {
     if (!dmConversations.has(userId)) {
         const { data: convId, error } = await supabase.rpc('get_or_create_dm', { p_other: userId });
         if (error || !convId) {
+            if (isBlockError(error)) {
+                showNotify('Bu kullanıcıyla mesajlaşamazsınız.', { title: 'Engel', type: 'warning' });
+            }
             await showChatListHome();
             return;
         }
@@ -273,6 +294,17 @@ async function openDmByUsernameSlug(usernameSlug) {
 
     const profile = await resolveUserBySlug(usernameSlug);
     if (!profile) {
+        await showChatListHome();
+        return;
+    }
+
+    const blockStatus = await fetchBlockStatus(profile.id);
+    if (blockStatus.isBlocked) {
+        if (blockStatus.blockedByMe) {
+            await openMemberProfile(profile.id, { push: false, fromChat: false });
+            return;
+        }
+        showNotify('Bu kullanıcıyla mesajlaşamazsınız.', { title: 'Engel', type: 'warning' });
         await showChatListHome();
         return;
     }
@@ -499,6 +531,7 @@ async function openMemberProfile(userId, { push = false, fromChat = false } = {}
         : `User-${userId}`;
 
     renderMemberProfile(data);
+    await updateMemberProfileBlockUi(userId);
     showMainContentView();
     document.body.classList.add('member-profile-view');
     switchView('member-profile-panel', { skipRouteSave: true });
@@ -545,9 +578,165 @@ function handleTopbarChatTitleClick() {
     void openMemberProfile(userId, { push: true, fromChat: true });
 }
 
+function removeDmFromSidebar(userId) {
+    document.getElementById(`user-${userId}`)?.remove();
+    dmConversations.delete(userId);
+}
+
+async function updateMemberProfileBlockUi(userId) {
+    const msgBtn = document.getElementById('memberProfileMessageBtn');
+    const blockBtn = document.getElementById('memberProfileBlockBtn');
+    if (!userId || userId === currentUserId) {
+        if (blockBtn) blockBtn.hidden = true;
+        if (msgBtn) msgBtn.hidden = false;
+        return;
+    }
+
+    const status = await fetchBlockStatus(userId);
+    if (msgBtn) {
+        msgBtn.hidden = status.isBlocked;
+        msgBtn.disabled = status.isBlocked;
+    }
+
+    if (!blockBtn) return;
+    blockBtn.hidden = false;
+    blockBtn.textContent = status.blockedByMe ? 'Engeli kaldır' : 'Engelle';
+    blockBtn.classList.toggle('member-profile-block-btn--unblock', status.blockedByMe);
+}
+
+async function handleBlockUser(userId, username = 'Kullanıcı') {
+    if (!isLoggedIn()) {
+        promptLogin();
+        return;
+    }
+
+    if (!userId || userId === currentUserId) return;
+
+    const status = await fetchBlockStatus(userId);
+
+    try {
+        if (status.blockedByMe) {
+            await unblockUser(userId);
+            showNotify(`${username} engeli kaldırıldı.`, { title: 'Engel', type: 'success' });
+        } else {
+            const confirmed = await showConfirmToast(
+                `${username} kullanıcısını engellemek istiyor musunuz?`,
+                { confirmLabel: 'Engelle', cancelLabel: 'İptal', type: 'warning' }
+            );
+            if (!confirmed) return;
+            await blockUser(userId);
+            showNotify(`${username} engellendi.`, { title: 'Engel', type: 'success' });
+        }
+    } catch (err) {
+        showNotify(err.message || 'İşlem başarısız.', { title: 'Engel', type: 'error' });
+        return;
+    }
+
+    await refreshBlockedRelations();
+    removeDmFromSidebar(userId);
+
+    if (currentActiveChat === `User-${userId}`) {
+        await showChatListHome();
+    }
+
+    if (viewingMemberProfileUserId === userId) {
+        await updateMemberProfileBlockUi(userId);
+    }
+
+    await refreshBlockedUsersList();
+    updateMessageInputState();
+}
+
+async function refreshBlockedUsersList() {
+    const list = document.getElementById('blockedUsersList');
+    const hint = document.getElementById('blockedUsersHint');
+    if (!list) return;
+
+    if (!isLoggedIn()) {
+        list.innerHTML = '';
+        if (hint) hint.hidden = false;
+        return;
+    }
+
+    list.innerHTML = '<p class="blocked-users-empty">Yükleniyor…</p>';
+
+    try {
+        const blocked = await fetchBlockedByMeList();
+        list.innerHTML = '';
+
+        if (hint) hint.hidden = blocked.length > 0;
+
+        if (!blocked.length) {
+            const empty = document.createElement('p');
+            empty.className = 'blocked-users-empty';
+            empty.textContent = 'Engellenmiş kullanıcı yok.';
+            list.appendChild(empty);
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        for (const entry of blocked) {
+            fragment.appendChild(createBlockedUserRow(entry));
+        }
+        list.appendChild(fragment);
+    } catch (err) {
+        list.innerHTML = '';
+        const error = document.createElement('p');
+        error.className = 'blocked-users-empty blocked-users-empty--error';
+        error.textContent = 'Liste yüklenemedi.';
+        list.appendChild(error);
+        console.warn('[blocks] engellenenler listesi:', err);
+    }
+}
+
+function createBlockedUserRow(entry) {
+    const row = document.createElement('div');
+    row.className = 'blocked-user-item';
+
+    const avatar = document.createElement('div');
+    avatar.className = 'blocked-user-item__avatar';
+    applyAvatarDisplay(avatar, entry.avatarUrl, entry.username, entry.avatarR2Key);
+
+    const body = document.createElement('div');
+    body.className = 'blocked-user-item__body';
+
+    const name = document.createElement('span');
+    name.className = 'blocked-user-item__name';
+    name.textContent = entry.username;
+
+    const meta = document.createElement('span');
+    meta.className = 'blocked-user-item__meta';
+    meta.textContent = entry.blockedAt
+        ? new Date(entry.blockedAt).toLocaleString('tr-TR', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
+        })
+        : '';
+
+    body.append(name, meta);
+
+    const unblockBtn = document.createElement('button');
+    unblockBtn.type = 'button';
+    unblockBtn.className = 'blocked-user-item__unblock';
+    unblockBtn.textContent = 'Engeli kaldır';
+    unblockBtn.addEventListener('click', () => {
+        void handleBlockUser(entry.userId, entry.username);
+    });
+
+    row.append(avatar, body, unblockBtn);
+    return row;
+}
+
 function initMemberProfileControls() {
     document.getElementById('memberProfileMessageBtn')?.addEventListener('click', () => {
         void returnFromMemberProfile();
+    });
+
+    document.getElementById('memberProfileBlockBtn')?.addEventListener('click', () => {
+        const userId = viewingMemberProfileUserId;
+        const username = viewingMemberProfileUsername || document.getElementById('memberProfileUsername')?.textContent || 'Kullanıcı';
+        void handleBlockUser(userId, username);
     });
 }
 
@@ -754,14 +943,26 @@ async function removeProfileAvatar() {
 
 function updateMessageInputState() {
     const input = document.getElementById('messageInput');
+    const sendBtn = document.querySelector('.send-btn');
     if (!input) return;
-    input.placeholder = isLoggedIn()
-        ? 'Mesaj yazın...'
-        : 'Mesaj yazmak için giriş yapın...';
 
-    input.onfocus = isLoggedIn() ? null : () => {
+    const partnerId = currentActiveChat?.startsWith('User-')
+        ? currentActiveChat.replace('User-', '')
+        : null;
+    const blocked = partnerId && isUserBlocked(partnerId);
+
+    input.disabled = !!blocked;
+    if (sendBtn) sendBtn.disabled = !!blocked;
+
+    input.placeholder = !isLoggedIn()
+        ? 'Mesaj yazmak için giriş yapın...'
+        : blocked
+            ? 'Bu kullanıcıyla mesajlaşamazsınız.'
+            : 'Mesaj yazın...';
+
+    input.onfocus = isLoggedIn() && !blocked ? null : () => {
         input.blur();
-        promptLogin();
+        if (!isLoggedIn()) promptLogin();
     };
 
     resizeMessageInput(input);
@@ -837,6 +1038,7 @@ window.switchView = function (panelId, { skipRouteSave = false } = {}) {
         ensureHmProfileControls();
         initPinVisibilityToggles(document.getElementById('hmPinGroup'));
         updateProfileShareLink();
+        void refreshBlockedUsersList();
     }
     closeTopbarMenus();
     closeNotificationDropdown();
@@ -917,8 +1119,7 @@ async function loadProfile() {
             id: currentUserId,
             username: 'Kullanıcı',
             district: DEFAULT_LOCATION,
-            current_district: DEFAULT_LOCATION,
-            is_visible: false
+            current_district: DEFAULT_LOCATION
         });
         currentMyUsername = 'Kullanıcı';
         currentMyAvatarUrl = null;
@@ -941,6 +1142,7 @@ async function loadProfile() {
     await ensurePushSubscription().catch(() => {});
     await updatePushStatusUI();
     await refreshCloudAdminStatus();
+    await refreshBlockedRelations();
     refreshTopbarMenu();
 }
 
@@ -978,7 +1180,6 @@ async function saveProfile() {
 
     const { error } = await supabase.from('profiles').update({
         username: newName,
-        is_visible: false,
         about_me: aboutText || null,
         home_location: profileDetails.home_location,
         job: profileDetails.job,
@@ -1284,6 +1485,7 @@ function showEmptyChat() {
 
 function handleIncomingBroadcast(payload) {
     if (payload.sender_id && payload.sender_id === currentUserId) return;
+    if (payload.sender_id && isUserBlocked(payload.sender_id)) return;
 
     const contentType = payload.content_type || 'text';
     const mediaUrl = resolveMessageMediaUrl(payload.media_url, payload.r2_key);
@@ -1329,6 +1531,7 @@ function refreshDmNotificationListeners() {
 
 function notifyIncomingDmMessage(payload, conversationId) {
     if (!payload || payload.sender_id === currentUserId) return;
+    if (payload.sender_id && isUserBlocked(payload.sender_id)) return;
 
     const partnerUserId = getUserIdForConversation(conversationId) || payload.sender_id;
     const chatId = partnerUserId ? `User-${partnerUserId}` : currentActiveChat;
@@ -1554,6 +1757,51 @@ function setOlderMessagesLoading(visible) {
     indicator.setAttribute('aria-label', 'Eski mesajlar yükleniyor');
     indicator.textContent = 'Eski mesajlar yükleniyor…';
     container.insertBefore(indicator, container.firstChild);
+}
+
+async function jumpToSearchMessage(messageId, createdAt) {
+    closeSearchPanel();
+
+    if (!messageId || !currentConversationId) return;
+
+    const findMessageEl = () => document.querySelector(`.message[data-message-id="${messageId}"]`);
+
+    let el = findMessageEl();
+    if (el) {
+        scrollToQuotedMessage({ messageId });
+        return;
+    }
+
+    let tries = 0;
+    while (tries < 30 && messageHistoryHasMore) {
+        const oldest = messageHistoryOldestAt;
+        if (oldest && createdAt && new Date(createdAt) >= new Date(oldest)) {
+            break;
+        }
+        await loadOlderMessageHistory();
+        if (currentConversationId === null) return;
+        el = findMessageEl();
+        if (el) {
+            scrollToQuotedMessage({ messageId });
+            return;
+        }
+        tries += 1;
+    }
+
+    showToast('Mesaj yüklenemedi.', { type: 'info' });
+}
+
+function initDashboardSearch() {
+    initSearchPanel({
+        isLoggedIn,
+        promptLogin,
+        getConversationId: () => currentConversationId,
+        getActiveChat: () => currentActiveChat,
+        getCurrentUserId: () => currentUserId,
+        isUserBlocked,
+        onOpenUser: (userId, username) => openDmByUserId(userId, username),
+        onJumpToMessage: jumpToSearchMessage
+    });
 }
 
 async function loadOlderMessageHistory() {
@@ -1992,7 +2240,9 @@ async function persistMessageAsync({
 
         if (error) {
             console.error('Mesaj kaydı başarısız:', error.message, error.details, row);
-            if (hasMedia) {
+            if (isBlockError(error)) {
+                showNotify('Bu kullanıcıyla mesajlaşamazsınız.', { title: 'Engel', type: 'warning' });
+            } else if (hasMedia) {
                 showNotify(
                     `Medya kaydedilemedi: ${error.message}`,
                     { title: 'Kayıt hatası', type: 'error' }
@@ -2515,6 +2765,8 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
     refreshDmNotificationListeners();
     await loadMessageHistory(currentConversationId);
 
+    updateMessageInputState();
+
     await deliverPendingForward();
 
     saveAppRoute();
@@ -2523,6 +2775,14 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
 async function sendMessage() {
     if (!isLoggedIn()) {
         promptLogin();
+        return;
+    }
+
+    const partnerId = currentActiveChat?.startsWith('User-')
+        ? currentActiveChat.replace('User-', '')
+        : null;
+    if (partnerId && isUserBlocked(partnerId)) {
+        showNotify('Bu kullanıcıyla mesajlaşamazsınız.', { title: 'Engel', type: 'warning' });
         return;
     }
 
@@ -2831,6 +3091,8 @@ async function loadDmHistory() {
         return null;
     }
 
+    await refreshBlockedRelations();
+
     const { data: memberships, error: membershipError } = await supabase
         .from('conversation_members')
         .select('conversation_id')
@@ -2886,6 +3148,7 @@ async function loadDmHistory() {
 
     const chats = otherMembers
         .map((member) => {
+            if (isUserBlocked(member.user_id)) return null;
             const lastMsg = lastMessageByConv.get(member.conversation_id);
             if (!lastMsg) return null;
             return {
@@ -2970,6 +3233,7 @@ async function handleLogout() {
     closeTopbarMenus();
     setNotificationUser(null);
     resetCloudPanel();
+    clearBlockedRelations();
     refreshAvatarDisplays();
     refreshTopbarMenu();
     updateMessageInputState();
@@ -3075,7 +3339,8 @@ async function initDashboard() {
         onDeleteMessages: deleteMessages,
         onSelectionChange: updateSelectionBarUi,
         onForwardMessage: handleForwardRequest,
-        showNotify
+        showNotify,
+        onBlockUser: (userId, username) => handleBlockUser(userId, username)
     }));
     runInitStep('initMessageSelectionControls', initMessageSelectionControls);
     document.getElementById('appHomeLink')?.addEventListener('click', (event) => {
@@ -3086,6 +3351,7 @@ async function initDashboard() {
     runInitStep('initProfileDetails', initProfileDetailSelects);
     runInitStep('initProfileShare', initProfileShare);
     runInitStep('initMemberProfileControls', initMemberProfileControls);
+    runInitStep('initDashboardSearch', initDashboardSearch);
     runInitStep('initPushControls', initPushControls);
     runInitStep('initNotificationCenter', () => initNotificationCenter({
         onNavigate: (route) => {
@@ -3279,6 +3545,7 @@ configureTopbar({
     onCloudPanel: openCloudAdminPanel,
     onLogout: handleLogout,
     onMenuClick: () => window.toggleSidebar?.(),
+    onSearchClick: openSearchPanel,
     onProfileMenuOpen: () => refreshCloudAdminStatus(),
     onChatTitleClick: handleTopbarChatTitleClick
 });

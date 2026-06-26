@@ -1,5 +1,5 @@
 import { formatTime, appendTextWithLinks } from './utils.js';
-import { resolveMessageMediaUrl } from './media/urls.js';
+import { resolveMessageMediaUrl, resolveAvatarMediaUrl, displayMediaUrl } from './media/urls.js';
 import { openViewer } from './media/viewer.js';
 
 const CLOUD_PAGE_SIZE = 50;
@@ -164,6 +164,10 @@ function memberInitial(username) {
     return value ? value.charAt(0).toUpperCase() : '?';
 }
 
+function memberAvatarSrc(member) {
+    return displayMediaUrl(resolveAvatarMediaUrl(member.avatarUrl, member.avatarR2Key));
+}
+
 function renderMembersList({ append = false } = {}) {
     const list = el('cloudMembersList');
     if (!list) return;
@@ -186,20 +190,16 @@ function renderMembersList({ append = false } = {}) {
         const row = document.createElement('div');
         row.className = 'cloud-member-item';
 
-        const avatar = member.avatarUrl
-            ? `<img class="cloud-member-item__avatar" src="${escapeHtml(member.avatarUrl)}" alt="" loading="lazy">`
+        const avatarSrc = memberAvatarSrc(member);
+        const avatar = avatarSrc
+            ? `<img class="cloud-member-item__avatar" src="${escapeHtml(avatarSrc)}" alt="" loading="lazy">`
             : `<div class="cloud-member-item__avatar cloud-member-item__avatar--placeholder" aria-hidden="true">${escapeHtml(memberInitial(member.username))}</div>`;
-
-        const visibilityBadge = member.isVisible
-            ? ''
-            : '<span class="cloud-member-item__badge cloud-member-item__badge--hidden">Gizli</span>';
 
         row.innerHTML = `
             ${avatar}
             <div class="cloud-member-item__body">
                 <div class="cloud-member-item__title">
                     <span>${escapeHtml(member.username)}</span>
-                    ${visibilityBadge}
                 </div>
                 <span class="cloud-member-item__meta">${escapeHtml(member.location)} · ${escapeHtml(formatMemberDate(member.createdAt))}</span>
                 ${member.email ? `<span class="cloud-member-item__email">${escapeHtml(member.email)}</span>` : ''}
@@ -303,21 +303,59 @@ function renderConversationList() {
     }
 }
 
+let activeMemberIds = [];
+const cloudSenderSideMap = new Map();
+
+function normalizeCloudId(id) {
+    return String(id || '').trim().toLowerCase();
+}
+
+function syncCloudSenderSides(conversation, messages) {
+    const memberIds = conversation?.memberIds || activeMemberIds || [];
+    if (memberIds.length >= 2 && cloudSenderSideMap.size < 2) {
+        activeMemberIds = memberIds;
+        cloudSenderSideMap.set(normalizeCloudId(memberIds[0]), 'incoming');
+        cloudSenderSideMap.set(normalizeCloudId(memberIds[1]), 'outgoing');
+        return;
+    }
+
+    if (cloudSenderSideMap.size >= 2) return;
+
+    for (const message of messages) {
+        const senderId = normalizeCloudId(message.senderId);
+        if (!senderId || cloudSenderSideMap.has(senderId)) continue;
+        cloudSenderSideMap.set(senderId, cloudSenderSideMap.size === 0 ? 'incoming' : 'outgoing');
+        if (cloudSenderSideMap.size >= 2) break;
+    }
+}
+
+function getCloudMessageSide(senderId) {
+    const normalized = normalizeCloudId(senderId);
+    if (!normalized) return 'incoming';
+    return cloudSenderSideMap.get(normalized) || 'incoming';
+}
+
 function createCloudMessageRow(message) {
     const isDeleted = !!message.deletedAt;
+    const side = getCloudMessageSide(message.senderId);
+
     const row = document.createElement('div');
-    row.className = 'cloud-msg' + (isDeleted ? ' cloud-msg--deleted' : '');
+    row.className = `cloud-msg-row cloud-msg-row--${side}`;
+
+    const msg = document.createElement('div');
+    msg.className = `cloud-msg cloud-msg--${side}` + (isDeleted ? ' cloud-msg--deleted' : '');
+
+    const bubble = document.createElement('div');
+    bubble.className = 'cloud-msg__bubble';
 
     const head = document.createElement('div');
     head.className = 'cloud-msg__head';
 
     const sender = document.createElement('strong');
     sender.textContent = message.senderName || 'Kullanıcı';
-    if (message.receiverName) {
-        sender.textContent += ` → ${message.receiverName}`;
-    }
 
     const time = document.createElement('span');
+    time.className = 'cloud-msg__time';
     time.textContent = formatDateLabel(message.createdAt);
 
     head.append(sender, time);
@@ -327,7 +365,9 @@ function createCloudMessageRow(message) {
 
     if (isDeleted) {
         appendCloudMessageText(bodyWrap, message);
-        row.append(head, bodyWrap);
+        bubble.append(head, bodyWrap);
+        msg.appendChild(bubble);
+        row.appendChild(msg);
         return row;
     }
 
@@ -353,7 +393,9 @@ function createCloudMessageRow(message) {
         appendCloudMessageText(bodyWrap, message);
     }
 
-    row.append(head, bodyWrap);
+    bubble.append(head, bodyWrap);
+    msg.appendChild(bubble);
+    row.appendChild(msg);
     return row;
 }
 
@@ -414,6 +456,14 @@ function renderMessages({ conversation, messages, prepend = false }) {
 
     title.textContent = conversation?.title || 'Sohbet';
     meta.textContent = (conversation?.memberUsernames || []).join(' ↔ ') || 'Özel sohbet';
+
+    if (!prepend) {
+        cloudSenderSideMap.clear();
+    }
+    if (conversation?.memberIds?.length) {
+        activeMemberIds = conversation.memberIds;
+    }
+    syncCloudSenderSides(conversation, messages);
 
     if (!prepend) thread.innerHTML = '';
 
@@ -489,7 +539,7 @@ async function loadMessages({ conversationId, before = null, prepend = false } =
             prepend
         });
 
-        const count = el('cloudMessageThread')?.querySelectorAll('.cloud-msg').length || 0;
+        const count = el('cloudMessageThread')?.querySelectorAll('.cloud-msg-row').length || 0;
         setStatus(count ? `${count} mesaj gösteriliyor` : 'Mesaj yok');
     } catch (err) {
         if (!prepend) {
@@ -502,6 +552,8 @@ async function loadMessages({ conversationId, before = null, prepend = false } =
 
 async function openConversation(conversationId) {
     activeConversationId = conversationId;
+    activeMemberIds = [];
+    cloudSenderSideMap.clear();
     messagesBefore = null;
     messagesHasMore = false;
     renderConversationList();
@@ -537,6 +589,8 @@ export async function openCloudPanel() {
     activeCloudTab = 'chats';
     switchCloudTab('chats');
     activeConversationId = null;
+    activeMemberIds = [];
+    cloudSenderSideMap.clear();
     messagesBefore = null;
     el('bulut-panel')?.classList.remove('cloud-detail-open');
     el('cloudMessageThread') && (el('cloudMessageThread').innerHTML = '');

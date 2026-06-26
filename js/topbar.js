@@ -32,6 +32,7 @@ body.member-profile-view #headerTitleChat{cursor:pointer}
 .app-topbar__icon-btn:active{transform:scale(.96)}
 .app-topbar__icon-btn img{width:100%;height:100%;object-fit:cover;display:block}
 .app-topbar__icon-btn svg{width:20px;height:20px;fill:currentColor;display:block}
+.app-topbar__search[hidden]{display:none!important}
 .app-topbar__bell,.app-topbar__profile{position:relative;flex-shrink:0}
 .app-topbar__badge{position:absolute;top:2px;right:2px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#e53e3e;color:#fff;font-size:.68rem;font-weight:700;line-height:18px;text-align:center;border:2px solid #2077c5;pointer-events:none}
 .app-topbar__badge[hidden]{display:none!important}
@@ -52,6 +53,7 @@ const actions = {
     onCloudPanel: () => {},
     onLogout: () => {},
     onMenuClick: () => {},
+    onSearchClick: () => {},
     onProfileMenuOpen: null,
     onChatTitleClick: null
 };
@@ -95,6 +97,9 @@ function mountTopbar() {
                 </div>
             </div>
             <div class="app-topbar__end">
+                <button type="button" class="app-topbar__icon-btn app-topbar__search" id="topbarSearchBtn" aria-label="Ara" hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5Zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14Z"/></svg>
+                </button>
                 <div class="app-topbar__bell">
                     <button type="button" class="app-topbar__icon-btn" id="notificationBellBtn" aria-label="Bildirimler">
                         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -121,6 +126,11 @@ function bindTopbarEvents() {
     qs('topbarMenuBtn')?.addEventListener('click', (event) => {
         event.stopPropagation();
         actions.onMenuClick();
+    });
+
+    qs('topbarSearchBtn')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        actions.onSearchClick();
     });
 
     qs('headerProfilePic')?.addEventListener('click', (event) => {
@@ -262,6 +272,8 @@ function addMenuDivider() {
 
 export function refreshTopbarMenu() {
     const panel = qs('profileDropdown');
+    const searchBtn = qs('topbarSearchBtn');
+    if (searchBtn) searchBtn.hidden = !actions.getIsLoggedIn();
     if (!panel) return;
 
     panel.innerHTML = '';

@@ -66,3 +66,68 @@ export function showToast(message, { type = 'info', duration = 3200 } = {}) {
         window.setTimeout(() => toast.remove(), 220);
     }, duration);
 }
+
+let activeConfirmToast = null;
+
+export function showConfirmToast(message, {
+    confirmLabel = 'Engelle',
+    cancelLabel = 'İptal',
+    type = 'warning'
+} = {}) {
+    return new Promise((resolve) => {
+        const host = document.getElementById('toastHost');
+        if (!host || !message) {
+            resolve(false);
+            return;
+        }
+
+        if (activeConfirmToast) {
+            activeConfirmToast.remove();
+            activeConfirmToast = null;
+        }
+
+        const toast = document.createElement('div');
+        toast.className = `toast toast--confirm toast--${type}`;
+        toast.setAttribute('role', 'alertdialog');
+        toast.setAttribute('aria-modal', 'true');
+
+        const text = document.createElement('p');
+        text.className = 'toast__message';
+        text.textContent = message;
+
+        const actions = document.createElement('div');
+        actions.className = 'toast__actions';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'toast__btn toast__btn--cancel';
+        cancelBtn.textContent = cancelLabel;
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = 'toast__btn toast__btn--confirm';
+        confirmBtn.textContent = confirmLabel;
+
+        const finish = (result) => {
+            toast.classList.remove('is-visible');
+            window.setTimeout(() => {
+                toast.remove();
+                if (activeConfirmToast === toast) activeConfirmToast = null;
+                resolve(result);
+            }, 220);
+        };
+
+        cancelBtn.addEventListener('click', () => finish(false));
+        confirmBtn.addEventListener('click', () => finish(true));
+
+        actions.append(cancelBtn, confirmBtn);
+        toast.append(text, actions);
+        host.appendChild(toast);
+        activeConfirmToast = toast;
+
+        requestAnimationFrame(() => {
+            toast.classList.add('is-visible');
+            confirmBtn.focus();
+        });
+    });
+}

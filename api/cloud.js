@@ -106,7 +106,7 @@ async function handleConversations(client, query, res) {
 
     let convQuery = client
         .from('conversations')
-        .select('id, type, created_at')
+        .select('id, type, created_at, messages!inner(id)')
         .eq('type', 'dm')
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
@@ -161,23 +161,27 @@ async function handleConversations(client, query, res) {
         }
     }
 
-    let items = convList.map((conversation) => {
-        const latest = latestByConv.get(conversation.id)
-            || deletedLatestByConv.get(conversation.id)
-            || null;
-        const memberNames = membersByConv.get(conversation.id) || [];
-        const title = conversationTitle(conversation, memberNames);
+    let items = convList
+        .map((conversation) => {
+            const latest = latestByConv.get(conversation.id)
+                || deletedLatestByConv.get(conversation.id)
+                || null;
+            if (!latest) return null;
 
-        return {
-            id: conversation.id,
-            type: conversation.type,
-            title,
-            memberUsernames: memberNames,
-            lastAt: latest?.created_at || conversation.created_at,
-            preview: previewBody(latest),
-            previewDeleted: !!latest?.deleted_at
-        };
-    });
+            const memberNames = membersByConv.get(conversation.id) || [];
+            const title = conversationTitle(conversation, memberNames);
+
+            return {
+                id: conversation.id,
+                type: conversation.type,
+                title,
+                memberUsernames: memberNames,
+                lastAt: latest.created_at,
+                preview: previewBody(latest),
+                previewDeleted: !!latest.deleted_at
+            };
+        })
+        .filter(Boolean);
 
     items.sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt));
 
@@ -240,7 +244,7 @@ async function handleMembers(client, query, res) {
 
     let profileQuery = client
         .from('profiles')
-        .select('id, username, district, current_district, abroad_city, created_at, is_visible, avatar_url', { count: 'exact' })
+        .select('id, username, district, current_district, abroad_city, created_at, avatar_url, avatar_r2_key', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
 
@@ -267,8 +271,8 @@ async function handleMembers(client, query, res) {
             location: memberLocation(profile),
             email: emailById.get(profile.id) || null,
             createdAt: profile.created_at,
-            isVisible: profile.is_visible !== false,
-            avatarUrl: profile.avatar_url || null
+            avatarUrl: profile.avatar_url || null,
+            avatarR2Key: profile.avatar_r2_key || null
         })),
         total: typeof count === 'number' ? count : null,
         hasMore: list.length === limit
@@ -342,12 +346,26 @@ async function handleMessages(client, query, res) {
         return;
     }
 
+    const { data: members, error: membersError } = await client
+        .from('conversation_members')
+        .select('user_id')
+        .eq('conversation_id', conversationId)
+        .order('user_id', { ascending: true });
+
+    if (membersError) {
+        sendJson(res, 500, { error: membersError.message });
+        return;
+    }
+
+    const memberIds = (members || []).map((item) => item.user_id);
+
     sendJson(res, 200, {
         conversation: {
             id: conversation.id,
             type: conversation.type,
             title: conversationTitle(conversation, memberUsernames),
-            memberUsernames
+            memberUsernames,
+            memberIds
         },
         messages: ordered.map((message) => ({
             id: message.id,
