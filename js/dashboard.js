@@ -1322,6 +1322,7 @@ function appendMessageToUI({
     senderId,
     contentType,
     mediaUrl,
+    mediaR2Key = null,
     mediaState = 'ready',
     clientId = null,
     messageId = null,
@@ -1339,6 +1340,7 @@ function appendMessageToUI({
         senderId,
         contentType: contentType || 'text',
         mediaUrl: mediaUrl || null,
+        mediaR2Key,
         mediaState,
         clientId,
         messageId,
@@ -1597,17 +1599,24 @@ function handleIncomingBroadcast(payload) {
 
     if (contentType !== 'text' && !mediaUrl) return;
 
-    appendMessageToUI({
-        sender: payload.sender_name || 'Kullanıcı',
-        body: payload.body || '',
-        time: formatTime(payload.created_at),
-        createdAt: payload.created_at,
-        isOutgoing: false,
-        senderId: payload.sender_id || null,
-        contentType,
-        mediaUrl,
-        clientId: payload.client_id || null,
-        quote: payload.quote || null
+    const signPromise = contentType !== 'text'
+        ? signMediaPaths([{ media_url: payload.media_url, r2_key: payload.r2_key }])
+        : Promise.resolve();
+
+    void signPromise.then(() => {
+        appendMessageToUI({
+            sender: payload.sender_name || 'Kullanıcı',
+            body: payload.body || '',
+            time: formatTime(payload.created_at),
+            createdAt: payload.created_at,
+            isOutgoing: false,
+            senderId: payload.sender_id || null,
+            contentType,
+            mediaUrl,
+            mediaR2Key: payload.r2_key || null,
+            clientId: payload.client_id || null,
+            quote: payload.quote || null
+        });
     });
 
     notifyIncomingDmMessage(payload, currentConversationId);
@@ -2423,6 +2432,10 @@ async function dispatchOutgoingMessage({
         conversation_id: currentConversationId,
         quote: serializedQuote
     };
+
+    if (hasMedia && r2Key) {
+        await signMediaPaths([r2Key]);
+    }
 
     if (!skipAppend) {
         appendMessageToUI({

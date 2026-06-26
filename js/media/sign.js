@@ -63,8 +63,10 @@ export async function ensureSignedMediaUrl(mediaUrl, r2Key = null) {
     const cached = cache.get(path);
     if (isFresh(cached)) return cached.url;
 
-    await signMediaPaths([path]);
-    return cache.get(path)?.url || displayMediaUrl(mediaUrl, r2Key) || mediaUrl;
+    const urls = await signMediaPaths([path]);
+    const signed = urls[path] || cache.get(path)?.url;
+    // İmzasız proxy URL 403 döner; yalnızca imzalı adres kullanılır.
+    return signed || null;
 }
 
 export async function signMediaInContainer(root) {
@@ -86,7 +88,8 @@ export async function signMediaInContainer(root) {
         if (!signed) return;
 
         host.querySelectorAll('img, video, audio').forEach((el) => {
-            if (el.src && !el.src.includes('sig=')) {
+            if (!signed) return;
+            if (!el.src || !el.src.includes('sig=')) {
                 el.src = signed;
             }
         });
