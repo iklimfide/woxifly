@@ -289,6 +289,7 @@ export function createMessageElement({
         : null;
 
     if (kind) wrapper.dataset.contentType = kind;
+    if (mediaR2Key) wrapper.dataset.mediaR2Key = mediaR2Key;
     if (src && !src.startsWith('blob:')) wrapper.dataset.mediaUrl = src;
 
     const senderEl = document.createElement('span');

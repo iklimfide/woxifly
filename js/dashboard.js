@@ -2098,6 +2098,15 @@ async function resolveMessageIds(targets) {
     return { messageIds, clientIds };
 }
 
+async function resolveMessageIdsWithRetry(targets, { retries = 2, delayMs = 400 } = {}) {
+    let result = await resolveMessageIds(targets);
+    for (let attempt = 0; attempt < retries && !result.messageIds.length && result.clientIds.length; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+        result = await resolveMessageIds(targets);
+    }
+    return result;
+}
+
 async function deleteMessages(targets, scope = 'me') {
     if (!isLoggedIn()) {
         promptLogin();
@@ -2107,7 +2116,9 @@ async function deleteMessages(targets, scope = 'me') {
     if (!targets?.length) return;
 
     const deleteScope = scope === 'everyone' ? 'everyone' : 'me';
-    const { messageIds, clientIds } = await resolveMessageIds(targets);
+    let { messageIds, clientIds } = deleteScope === 'me'
+        ? await resolveMessageIdsWithRetry(targets)
+        : await resolveMessageIds(targets);
 
     if (deleteScope === 'everyone') {
         if (!messageIds.length) {
@@ -2158,6 +2169,12 @@ async function deleteMessages(targets, scope = 'me') {
         }
 
         purgeMessagesFromCache(currentConversationId, messageIds);
+    } else if (clientIds.length) {
+        showNotify('Mesaj henüz kaydedilmedi. Birkaç saniye sonra tekrar deneyin.', {
+            title: 'Benden sil',
+            type: 'warning'
+        });
+        return;
     }
 
     removeMessagesFromDom({ messageIds, clientIds });
@@ -2831,12 +2848,13 @@ async function deliverPendingForward() {
     clearPendingForward();
 
     const contentType = payload.contentType || 'text';
-    const hasMedia = contentType !== 'text' && payload.mediaUrl;
+    const hasMedia = contentType !== 'text' && isValidMediaUrl(payload.mediaUrl, payload.mediaR2Key);
 
     await dispatchOutgoingMessage({
         body: payload.body || '',
         contentType: hasMedia ? contentType : 'text',
-        mediaUrl: hasMedia ? payload.mediaUrl : null
+        mediaUrl: hasMedia ? payload.mediaUrl : null,
+        r2Key: hasMedia ? payload.mediaR2Key : null
     });
 }
 
@@ -3519,8 +3537,7 @@ async function initDashboard() {
         onDeleteMessages: deleteMessages,
         onSelectionChange: updateSelectionBarUi,
         onForwardMessage: handleForwardRequest,
-        showNotify,
-        onBlockUser: (userId, username) => handleBlockUser(userId, username)
+        showNotify
     }));
     runInitStep('initMessageSelectionControls', initMessageSelectionControls);
     document.getElementById('appHomeLink')?.addEventListener('click', (event) => {

@@ -16,7 +16,6 @@ let onToggleReaction = null;
 let onDeleteMessages = null;
 let onForwardMessage = null;
 let onShowNotify = null;
-let onBlockUser = null;
 let getAuthContext = null;
 let getViewerContext = () => ({ userId: null, username: null });
 let selectionMode = false;
@@ -447,11 +446,13 @@ export function extractMessagePayload(messageEl) {
     const isOutgoing = messageEl.classList.contains('outgoing');
     const senderEl = messageEl.querySelector('.message-sender');
     const contentType = messageEl.dataset.contentType || 'text';
+    const mediaHost = messageEl.querySelector('.message-media');
 
     return {
         body: bodyEl?.textContent?.trim() || '',
         contentType,
-        mediaUrl: messageEl.dataset.mediaUrl || null,
+        mediaUrl: messageEl.dataset.mediaUrl || mediaHost?.dataset.mediaSrc || null,
+        mediaR2Key: messageEl.dataset.mediaR2Key || mediaHost?.dataset.mediaR2Key || null,
         sender: isOutgoing ? 'Ben' : (senderEl?.textContent?.replace(/^@/, '') || 'Kullanıcı')
     };
 }
@@ -778,26 +779,6 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
 
     appendContextDivider(menu);
 
-    if (
-        onBlockUser
-        && !messageEl.classList.contains('outgoing')
-        && messageEl.dataset.senderId
-    ) {
-        const senderName = messageEl.querySelector('.message-sender')?.textContent?.replace(/^@/, '') || 'Kullanıcı';
-        menu.appendChild(createContextMenuItem({
-            icon: '🚫',
-            label: 'Engelle',
-            danger: true,
-            onClick: () => {
-                if (!ctx?.isLoggedIn?.()) {
-                    ctx?.promptLogin?.();
-                    return;
-                }
-                onBlockUser(messageEl.dataset.senderId, senderName);
-            }
-        }));
-    }
-
     menu.appendChild(createContextMenuItem({
         icon: '☑',
         label: 'Seç',
@@ -930,8 +911,7 @@ export function initMessageInteractions({
     onDeleteMessages: onDeleteMessagesHandler,
     onSelectionChange: onSelectionChangeHandler,
     onForwardMessage: onForwardMessageHandler,
-    showNotify,
-    onBlockUser: onBlockUserHandler
+    showNotify
 }) {
     if (!messageContainer) return;
 
@@ -942,7 +922,6 @@ export function initMessageInteractions({
     onSelectionChange = onSelectionChangeHandler;
     onForwardMessage = onForwardMessageHandler;
     onShowNotify = showNotify;
-    onBlockUser = onBlockUserHandler;
     boundMessageContainer = messageContainer;
 
     let longPressTimer = null;
