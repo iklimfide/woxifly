@@ -13,6 +13,14 @@ export function isR2MediaKey(key) {
     return R2_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
+/** Mesaj veya URL'den R2 object key çıkarır. */
+export function mediaR2KeyFromMessage(mediaUrl, r2Key = null) {
+    if (isR2MediaKey(r2Key)) {
+        return String(r2Key).replace(/^\/+/, '').split('?')[0].split('#')[0];
+    }
+    return extractMediaPath(mediaUrl);
+}
+
 function normalizeMediaInput(input) {
     if (!input || typeof input !== 'string') return null;
     const trimmed = input.trim();

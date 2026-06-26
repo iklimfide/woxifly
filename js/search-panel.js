@@ -1,6 +1,7 @@
 import { supabase } from './supabase-client.js';
 import { resolveAvatarMediaUrl, displayMediaUrl } from './media/urls.js';
 import { closeTopbarMenus } from './topbar.js';
+import { PROFILE_DIRECTORY } from './profile-directory.js';
 
 let deps = null;
 let debounceTimer = null;
@@ -93,7 +94,7 @@ function createUserRow(profile) {
 
     const avatar = document.createElement('div');
     avatar.className = 'search-result-item__avatar';
-    const src = displayMediaUrl(resolveAvatarMediaUrl(profile.avatar_url, profile.avatar_r2_key));
+    const src = displayMediaUrl(resolveAvatarMediaUrl(profile.avatar_url, null));
     if (src) {
         const img = document.createElement('img');
         img.src = src;
@@ -176,8 +177,8 @@ async function searchUsers(query) {
     const currentUserId = deps?.getCurrentUserId?.();
     const term = escapeIlike(query);
     let profileQuery = supabase
-        .from('profiles')
-        .select('id, username, avatar_url, avatar_r2_key')
+        .from(PROFILE_DIRECTORY)
+        .select('id, username, avatar_url')
         .ilike('username', `%${term}%`)
         .order('username', { ascending: true })
         .limit(20);
@@ -254,7 +255,10 @@ async function runSearch(query) {
         results.appendChild(fragment);
     } catch (err) {
         if (query !== activeQuery) return;
-        results.innerHTML = `<p class="search-hint search-hint--error">${err.message || 'Arama başarısız.'}</p>`;
+        const errorEl = document.createElement('p');
+        errorEl.className = 'search-hint search-hint--error';
+        errorEl.textContent = err.message || 'Arama başarısız.';
+        results.replaceChildren(errorEl);
     }
 }
 

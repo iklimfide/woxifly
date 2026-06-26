@@ -292,7 +292,7 @@ export function updateMessageReactions(messageEl, reactionList) {
         pill.className = `message-reaction-pill${item.mine ? ' mine' : ''}`;
         pill.dataset.emoji = item.emoji;
         pill.title = `${item.count} tepki`;
-        pill.innerHTML = `<span class="message-reaction-emoji">${item.emoji}</span><span class="message-reaction-count">${item.count}</span>`;
+        fillReactionPill(pill, item.emoji, item.count);
         pill.addEventListener('click', (event) => {
             event.stopPropagation();
             handleReactionPick(messageEl, item.emoji);

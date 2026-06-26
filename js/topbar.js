@@ -12,8 +12,7 @@ const TOPBAR_CSS = `
 .app-topbar__menu-btn{width:40px;height:40px;border:none;border-radius:8px;background:rgba(255,255,255,.18);color:#fff;font-size:1.2rem;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .app-topbar__menu-btn:active{transform:scale(.96)}
 body.chats-home-view .app-topbar__menu-btn{display:none!important}
-body.chats-home-view .app-topbar__inner{position:relative}
-body.chats-home-view #headerTitleChat:not([hidden]){position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);flex:none;width:max-content;max-width:calc(100% - 112px);justify-content:center}
+body.chats-home-view #headerTitleChat:not([hidden]){flex:none;justify-content:flex-start}
 body.chats-home-view #activeChatAvatar{display:none!important}
 body.chats-home-view .app-topbar__chat-name{font-size:1.05rem;font-weight:600}
 body.chat-open-view #headerTitleChat{cursor:pointer}

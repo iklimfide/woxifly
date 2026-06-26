@@ -1,4 +1,5 @@
 import { supabase } from './supabase-client.js';
+import { PROFILE_DIRECTORY } from './profile-directory.js';
 
 const blockedRelationIds = new Set();
 
@@ -86,8 +87,8 @@ export async function fetchBlockedByMeList() {
 
     const ids = rows.map((row) => row.blocked_id);
     const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url, avatar_r2_key')
+        .from(PROFILE_DIRECTORY)
+        .select('id, username, avatar_url')
         .in('id', ids);
 
     if (profileError) throw profileError;

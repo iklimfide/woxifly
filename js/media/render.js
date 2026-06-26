@@ -1,5 +1,6 @@
 import { openViewer } from './viewer.js';
 import { displayMediaUrl, getMediaDisplayUrls } from './urls.js';
+import { ensureSignedMediaUrl } from './sign.js';
 import { createVoiceMessagePlayer } from '../voice-message-ui.js';
 
 function el(tag, className, text) {
@@ -15,7 +16,19 @@ function pickVideoPosterTime(duration) {
     return Math.min(Math.max(duration * 0.1, 0.25), 2);
 }
 
-function buildThumb(kind, src) {
+function applyMediaSrc(el, src, r2Key) {
+    if (!src) return;
+    const initial = displayMediaUrl(src) || src;
+    el.src = initial;
+    if (initial.startsWith('blob:')) return;
+    void ensureSignedMediaUrl(src, r2Key).then((signed) => {
+        if (signed && el.isConnected && signed !== el.src) {
+            el.src = signed;
+        }
+    });
+}
+
+function buildThumb(kind, src, r2Key = null) {
     const resolved = displayMediaUrl(src) || src;
 
     if (kind === 'video') {
@@ -26,7 +39,7 @@ function buildThumb(kind, src) {
         video.preload = 'auto';
         video.setAttribute('aria-hidden', 'true');
         if (resolved) {
-            video.src = resolved;
+            applyMediaSrc(video, src, r2Key);
             let posterSeekDone = false;
             const seekToPoster = () => {
                 if (posterSeekDone) return;
@@ -52,7 +65,7 @@ function buildThumb(kind, src) {
     img.alt = '';
     img.loading = 'lazy';
     img.decoding = 'async';
-    img.src = resolved;
+    applyMediaSrc(img, src, r2Key);
     return img;
 }
 
@@ -120,12 +133,14 @@ export function renderMediaBlock(host, { kind, src, state = 'ready', mediaR2Key 
 
         const resolved = displayMediaUrl(src) || src;
         const canPreview = state === 'ready' || (state === 'pending' && resolved?.startsWith('blob:'));
-        const player = createVoiceMessagePlayer({
-            src: canPreview ? resolved : null,
-            state,
-            seed: resolved || host.dataset.clientId || 'voice'
+        void ensureSignedMediaUrl(src, mediaR2Key).then((signedSrc) => {
+            const player = createVoiceMessagePlayer({
+                src: canPreview ? (signedSrc || resolved) : null,
+                state,
+                seed: resolved || host.dataset.clientId || 'voice'
+            });
+            host.appendChild(player);
         });
-        host.appendChild(player);
         return;
     }
 
@@ -138,7 +153,7 @@ export function renderMediaBlock(host, { kind, src, state = 'ready', mediaR2Key 
         card.setAttribute('aria-disabled', 'true');
         card.tabIndex = -1;
         if (src) {
-            const thumb = buildThumb(kind, src);
+            const thumb = buildThumb(kind, src, mediaR2Key);
             card.appendChild(thumb);
         }
         card.appendChild(el('span', 'media-card-label', 'Yükleniyor...'));
@@ -155,7 +170,7 @@ export function renderMediaBlock(host, { kind, src, state = 'ready', mediaR2Key 
         return;
     }
 
-    const thumb = buildThumb(kind, src);
+    const thumb = buildThumb(kind, src, mediaR2Key);
     const resolved = displayMediaUrl(src) || src;
 
     if (thumb.tagName === 'IMG') {

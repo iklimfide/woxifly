@@ -104,6 +104,10 @@ export function getCronSecret() {
     return env('CRON_SECRET');
 }
 
+export function getMediaSigningSecret() {
+    return env('MEDIA_SIGNING_SECRET') || env('CRON_SECRET');
+}
+
 export function getVapidConfig() {
     const publicKey = env('VAPID_PUBLIC_KEY');
     const privateKey = env('VAPID_PRIVATE_KEY');

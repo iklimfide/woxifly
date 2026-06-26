@@ -2,6 +2,17 @@ import { openLink } from './link-viewer.js';
 import { resolveMessageMediaUrl, isMediaKind } from './media/urls.js';
 import { createMediaHost } from './media/render.js';
 
+function fillReactionPill(pill, emoji, count) {
+    pill.replaceChildren();
+    const emojiSpan = document.createElement('span');
+    emojiSpan.className = 'message-reaction-emoji';
+    emojiSpan.textContent = emoji;
+    const countSpan = document.createElement('span');
+    countSpan.className = 'message-reaction-count';
+    countSpan.textContent = String(count);
+    pill.append(emojiSpan, countSpan);
+}
+
 export function sanitizeText(value, maxLength = 2000) {
     if (typeof value !== 'string') return '';
     return value
@@ -238,7 +249,7 @@ function appendReactionsBar(wrapper, reactions) {
         pill.className = `message-reaction-pill${item.mine ? ' mine' : ''}`;
         pill.dataset.emoji = item.emoji;
         pill.title = `${item.count} tepki`;
-        pill.innerHTML = `<span class="message-reaction-emoji">${item.emoji}</span><span class="message-reaction-count">${item.count}</span>`;
+        fillReactionPill(pill, item.emoji, item.count);
         bar.appendChild(pill);
     }
 

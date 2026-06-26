@@ -150,6 +150,8 @@ import {
     isBlockError
 } from './user-blocks.js';
 import { initSearchPanel, openSearchPanel, closeSearchPanel } from './search-panel.js';
+import { PROFILE_DIRECTORY } from './profile-directory.js';
+import { collectMediaKeysFromMessages, signMediaPaths, signMediaInContainer } from './media/sign.js';
 
 let currentUserId = null;
 let pendingForward = null;
@@ -203,7 +205,7 @@ async function resolveUserBySlug(slug) {
     const target = slug.toLowerCase();
 
     const { data: exact } = await supabase
-        .from('profiles')
+        .from(PROFILE_DIRECTORY)
         .select('id, username, avatar_url')
         .eq('username', slug)
         .maybeSingle();
@@ -211,13 +213,54 @@ async function resolveUserBySlug(slug) {
     if (exact && usernameToSlug(exact.username) === target) return exact;
 
     const { data: rows } = await supabase
-        .from('profiles')
+        .from(PROFILE_DIRECTORY)
         .select('id, username, avatar_url')
         .ilike('username', slug);
 
     if (!rows?.length) return null;
 
     return rows.find((profile) => usernameToSlug(profile.username) === target) || null;
+}
+
+async function findExistingDmPartnerConversationId(partnerUserId) {
+    if (!currentUserId || !partnerUserId) return null;
+    if (dmConversations.has(partnerUserId)) {
+        return dmConversations.get(partnerUserId);
+    }
+
+    const { data: memberships, error } = await supabase
+        .from('conversation_members')
+        .select('conversation_id')
+        .eq('user_id', currentUserId);
+
+    if (error || !memberships?.length) return null;
+
+    const myConvIds = memberships.map((row) => row.conversation_id);
+    const { data: partnerMembership } = await supabase
+        .from('conversation_members')
+        .select('conversation_id')
+        .eq('user_id', partnerUserId)
+        .in('conversation_id', myConvIds)
+        .limit(1)
+        .maybeSingle();
+
+    if (!partnerMembership?.conversation_id) return null;
+
+    const { data: conversation } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('id', partnerMembership.conversation_id)
+        .eq('type', 'dm')
+        .maybeSingle();
+
+    return conversation?.id || null;
+}
+
+async function partnerDmHasVisibleMessages(partnerUserId) {
+    const conversationId = await findExistingDmPartnerConversationId(partnerUserId);
+    if (!conversationId) return false;
+    const lastMsg = await fetchLastDmMessage(conversationId);
+    return Boolean(lastMsg);
 }
 
 async function openDmByUserId(userId, usernameHint = null, avatarUrl = null) {
@@ -242,7 +285,7 @@ async function openDmByUserId(userId, usernameHint = null, avatarUrl = null) {
 
     if (!username) {
         const { data } = await supabase
-            .from('profiles')
+            .from(PROFILE_DIRECTORY)
             .select('username, avatar_url')
             .eq('id', userId)
             .maybeSingle();
@@ -267,8 +310,19 @@ async function openDmByUserId(userId, usernameHint = null, avatarUrl = null) {
             return;
         }
         dmConversations.set(userId, convId);
-        if (!document.getElementById(`user-${userId}`)) {
-            addDmToSidebar(userId, username, '');
+        const lastMsg = await fetchLastDmMessage(convId);
+        if (lastMsg && !document.getElementById(`user-${userId}`)) {
+            addDmToSidebar(
+                userId,
+                username,
+                previewFromMessage({
+                    body: lastMsg.body,
+                    contentType: lastMsg.content_type || 'text',
+                    isOutgoing: lastMsg.sender_id === currentUserId
+                }),
+                avatarUrl,
+                { lastTime: lastMsg.created_at }
+            );
         }
     }
 
@@ -309,7 +363,13 @@ async function openDmByUsernameSlug(usernameSlug) {
         return;
     }
 
-    await openDmByUserId(profile.id, profile.username, profile.avatar_url || null);
+    const hasVisibleMessages = await partnerDmHasVisibleMessages(profile.id);
+    if (hasVisibleMessages) {
+        await openDmByUserId(profile.id, profile.username, profile.avatar_url || null);
+        return;
+    }
+
+    await openMemberProfile(profile.id, { push: false, fromChat: false });
 }
 
 async function restoreAppRoute(route) {
@@ -419,7 +479,7 @@ async function resolveDmPartnerAvatar(userId, avatarUrl = null) {
     if (sidebarImg?.src) return sidebarImg.src;
 
     const { data } = await supabase
-        .from('profiles')
+        .from(PROFILE_DIRECTORY)
         .select('avatar_url')
         .eq('id', userId)
         .maybeSingle();
@@ -477,7 +537,7 @@ function renderMemberProfile(profile) {
         document.getElementById('memberProfileAvatar'),
         profile.avatar_url,
         username,
-        profile.avatar_r2_key
+        null
     );
 
     const hasAbout = setMemberProfileField('memberProfileAboutWrap', 'memberProfileAbout', profile.about_me);
@@ -491,7 +551,7 @@ function renderMemberProfile(profile) {
     document.getElementById('activeChatName').textContent = username;
     const activeChatAvatar = document.getElementById('activeChatAvatar');
     if (activeChatAvatar) activeChatAvatar.hidden = false;
-    applyAvatarDisplay(activeChatAvatar, profile.avatar_url, username, profile.avatar_r2_key);
+    applyAvatarDisplay(activeChatAvatar, profile.avatar_url, username, null);
 
     const statusEl = document.getElementById('activeChatStatus');
     if (statusEl) {
@@ -514,8 +574,8 @@ async function openMemberProfile(userId, { push = false, fromChat = false } = {}
     }
 
     const { data, error } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url, avatar_r2_key, about_me, home_location, job, marital_status')
+        .from(PROFILE_DIRECTORY)
+        .select('id, username, avatar_url, about_me, home_location, job, marital_status')
         .eq('id', userId)
         .maybeSingle();
 
@@ -578,9 +638,54 @@ function handleTopbarChatTitleClick() {
     void openMemberProfile(userId, { push: true, fromChat: true });
 }
 
-function removeDmFromSidebar(userId) {
+function removeDmFromSidebar(userId, { keepConversation = false } = {}) {
     document.getElementById(`user-${userId}`)?.remove();
-    dmConversations.delete(userId);
+    if (!keepConversation) dmConversations.delete(userId);
+
+    const list = document.getElementById('myActiveChatsList');
+    if (list && !list.querySelector('.chat-item')) {
+        renderDmEmptyState();
+    }
+}
+
+async function refreshPartnerSidebarAfterMessageChange(partnerUserId) {
+    if (!partnerUserId) return;
+
+    const conversationId = dmConversations.get(partnerUserId)
+        || await findExistingDmPartnerConversationId(partnerUserId);
+    if (!conversationId) return;
+
+    const lastMsg = await fetchLastDmMessage(conversationId);
+    if (!lastMsg) {
+        removeDmFromSidebar(partnerUserId, { keepConversation: true });
+        return;
+    }
+
+    if (!document.getElementById(`user-${partnerUserId}`)) {
+        const username = dmTitles.get(partnerUserId) || 'Kullanıcı';
+        addDmToSidebar(
+            partnerUserId,
+            username,
+            previewFromMessage({
+                body: lastMsg.body,
+                contentType: lastMsg.content_type || 'text',
+                isOutgoing: lastMsg.sender_id === currentUserId
+            }),
+            null,
+            { lastTime: lastMsg.created_at }
+        );
+        return;
+    }
+
+    updateDmSidebarPreview(
+        partnerUserId,
+        previewFromMessage({
+            body: lastMsg.body,
+            contentType: lastMsg.content_type || 'text',
+            isOutgoing: lastMsg.sender_id === currentUserId
+        }),
+        lastMsg.created_at
+    );
 }
 
 async function updateMemberProfileBlockUi(userId) {
@@ -1564,14 +1669,24 @@ function handleIncomingDmNotification(payload, conversationId) {
     notifyIncomingDmMessage(payload, conversationId);
 }
 
+function isSafeReactionEmoji(value) {
+    if (typeof value !== 'string') return false;
+    const emoji = value.trim();
+    if (!emoji || emoji.length > 8) return false;
+    return !/[<>&"']/.test(emoji);
+}
+
 function handleIncomingReactionBroadcast(payload) {
     if (!payload?.emoji || !payload?.user_id) return;
+    if (!isSafeReactionEmoji(payload.emoji)) return;
     if (payload.user_id === currentUserId) return;
+    if (payload.user_id && isUserBlocked(payload.user_id)) return;
     handleIncomingReaction(payload, currentUserId);
 }
 
 function handleIncomingDeleteBroadcast(payload) {
     if (!payload) return;
+    if (payload.user_id && isUserBlocked(payload.user_id)) return;
     removeMessagesFromDom({
         messageIds: payload.message_ids || [],
         clientIds: payload.client_ids || []
@@ -1586,6 +1701,16 @@ function handleIncomingDeleteBroadcast(payload) {
 function handleIncomingEditBroadcast(payload) {
     if (!payload?.body) return;
     if (payload.user_id === currentUserId) return;
+    if (payload.user_id && isUserBlocked(payload.user_id)) return;
+
+    const target = findMessageElement({
+        messageId: payload.message_id || null,
+        clientId: payload.client_id || null
+    });
+    if (!target) return;
+    if (payload.user_id && target.dataset.senderId && payload.user_id !== target.dataset.senderId) {
+        return;
+    }
 
     applyMessageEditInDom({
         messageId: payload.message_id || null,
@@ -1672,31 +1797,34 @@ function renderMessageHistoryRows(container, ordered, {
         return;
     }
 
-    let lastDayKey = null;
-    const fragment = document.createDocumentFragment();
+    void signMediaPaths(collectMediaKeysFromMessages(ordered)).then(() => {
+        let lastDayKey = null;
+        const fragment = document.createDocumentFragment();
 
-    ordered.forEach((msg) => {
-        const dayKey = getCalendarDayKey(msg.created_at);
-        if (dayKey && dayKey !== lastDayKey) {
-            fragment.appendChild(createMessageDateSeparator(msg.created_at));
-            lastDayKey = dayKey;
+        ordered.forEach((msg) => {
+            const dayKey = getCalendarDayKey(msg.created_at);
+            if (dayKey && dayKey !== lastDayKey) {
+                fragment.appendChild(createMessageDateSeparator(msg.created_at));
+                lastDayKey = dayKey;
+            }
+            fragment.appendChild(createMessageHistoryElement(msg, { profileMap, reactionsByMessage }));
+        });
+
+        if (prepend) {
+            const prevScrollHeight = container.scrollHeight;
+            const prependedCount = ordered.length;
+            const lastPrependedDayKey = getCalendarDayKey(ordered[ordered.length - 1].created_at);
+            container.insertBefore(fragment, container.firstChild);
+            fixPrependedDateSeparatorBoundary(container, prependedCount, lastPrependedDayKey);
+            container.scrollTop = container.scrollHeight - prevScrollHeight;
+        } else {
+            container.appendChild(fragment);
+            if (autoScroll) container.scrollTop = container.scrollHeight;
         }
-        fragment.appendChild(createMessageHistoryElement(msg, { profileMap, reactionsByMessage }));
+
+        refreshSelectionUi(container);
+        void signMediaInContainer(container);
     });
-
-    if (prepend) {
-        const prevScrollHeight = container.scrollHeight;
-        const prependedCount = ordered.length;
-        const lastPrependedDayKey = getCalendarDayKey(ordered[ordered.length - 1].created_at);
-        container.insertBefore(fragment, container.firstChild);
-        fixPrependedDateSeparatorBoundary(container, prependedCount, lastPrependedDayKey);
-        container.scrollTop = container.scrollHeight - prevScrollHeight;
-    } else {
-        container.appendChild(fragment);
-        if (autoScroll) container.scrollTop = container.scrollHeight;
-    }
-
-    refreshSelectionUi(container);
 }
 
 async function fetchMessageHistoryBatch(conversationId, { before = null } = {}) {
@@ -1718,7 +1846,7 @@ async function fetchMessageHistoryBatch(conversationId, { before = null } = {}) 
 
     const [profilesResult, reactionsResult] = await Promise.all([
         senderIds.length
-            ? supabase.from('profiles').select('id, username').in('id', senderIds)
+            ? supabase.from(PROFILE_DIRECTORY).select('id, username').in('id', senderIds)
             : Promise.resolve({ data: [], error: null }),
         messageIds.length
             ? supabase
@@ -2039,6 +2167,13 @@ async function deleteMessages(targets, scope = 'me') {
 
     if (isSelectionMode()) {
         exitSelectionMode(document.getElementById('messageContainer'));
+    }
+
+    const partnerId = currentActiveChat?.startsWith('User-')
+        ? currentActiveChat.replace('User-', '')
+        : null;
+    if (partnerId) {
+        await refreshPartnerSidebarAfterMessageChange(partnerId);
     }
 }
 
@@ -2922,7 +3057,7 @@ async function openChatFromSender(senderId, username) {
 
     if (!userId && username) {
         const { data } = await supabase
-            .from('profiles')
+            .from(PROFILE_DIRECTORY)
             .select('id')
             .eq('username', username)
             .maybeSingle();
@@ -3018,11 +3153,23 @@ function syncDmSidebarPreview(chatId, payload, isOutgoing) {
 
     if (!userId) return;
 
-    updateDmSidebarPreview(userId, previewFromMessage({
+    const preview = previewFromMessage({
         body: payload?.body || '',
         contentType: payload?.content_type || payload?.contentType || 'text',
         isOutgoing
-    }), payload?.created_at || null);
+    });
+    const createdAt = payload?.created_at || null;
+
+    if (!document.getElementById(`user-${userId}`)) {
+        const username = isOutgoing
+            ? (dmTitles.get(userId) || 'Kullanıcı')
+            : (payload?.sender_name || dmTitles.get(userId) || 'Kullanıcı');
+        dmTitles.set(userId, username);
+        addDmToSidebar(userId, username, preview, null, { lastTime: createdAt });
+        return;
+    }
+
+    updateDmSidebarPreview(userId, preview, createdAt);
 }
 
 function addDmToSidebar(userId, username, preview = '', avatarUrl = null, {
@@ -3078,6 +3225,31 @@ function addDmToSidebar(userId, username, preview = '', avatarUrl = null, {
     setDmListSectionVisible(true);
 }
 
+async function fetchLastDmMessage(conversationId) {
+    const { data, error } = await supabase
+        .from('messages')
+        .select('conversation_id, body, content_type, sender_id, sender_username, receiver_username, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (error) {
+        console.warn('[dm-list] mesaj okunamadı:', conversationId, error.message);
+        return null;
+    }
+
+    return data;
+}
+
+function partnerNameFromLastMessage(lastMsg, partnerUserId) {
+    if (!lastMsg || !partnerUserId) return null;
+    if (lastMsg.sender_id === partnerUserId) {
+        return lastMsg.sender_username || null;
+    }
+    return lastMsg.receiver_username || null;
+}
+
 async function loadDmHistory() {
     mostRecentDmChat = null;
     dmConversations.clear();
@@ -3099,6 +3271,7 @@ async function loadDmHistory() {
         .eq('user_id', currentUserId);
 
     if (membershipError || !memberships?.length) {
+        if (membershipError) console.warn('[dm-list] üyelik:', membershipError.message);
         renderDmEmptyState();
         return null;
     }
@@ -3112,38 +3285,29 @@ async function loadDmHistory() {
         .eq('type', 'dm');
 
     if (convError || !conversations?.length) {
+        if (convError) console.warn('[dm-list] konuşmalar:', convError.message);
         renderDmEmptyState();
         return null;
     }
 
     const dmConvIds = conversations.map((c) => c.id);
 
-    const [
-        { data: otherMembers, error: otherError },
-        { data: messages, error: messagesError }
-    ] = await Promise.all([
-        supabase
-            .from('conversation_members')
-            .select('conversation_id, user_id')
-            .in('conversation_id', dmConvIds)
-            .neq('user_id', currentUserId),
-        supabase
-            .from('messages')
-            .select('conversation_id, body, content_type, sender_id, created_at')
-            .in('conversation_id', dmConvIds)
-            .order('created_at', { ascending: false })
-    ]);
+    const { data: otherMembers, error: otherError } = await supabase
+        .from('conversation_members')
+        .select('conversation_id, user_id')
+        .in('conversation_id', dmConvIds)
+        .neq('user_id', currentUserId);
 
-    if (otherError || messagesError || !otherMembers?.length) {
+    if (otherError || !otherMembers?.length) {
+        if (otherError) console.warn('[dm-list] karşı üyeler:', otherError.message);
         renderDmEmptyState();
         return null;
     }
 
+    const lastMessages = await Promise.all(dmConvIds.map((convId) => fetchLastDmMessage(convId)));
     const lastMessageByConv = new Map();
-    for (const msg of messages || []) {
-        if (!lastMessageByConv.has(msg.conversation_id)) {
-            lastMessageByConv.set(msg.conversation_id, msg);
-        }
+    for (const msg of lastMessages) {
+        if (msg) lastMessageByConv.set(msg.conversation_id, msg);
     }
 
     const chats = otherMembers
@@ -3166,14 +3330,25 @@ async function loadDmHistory() {
     }
 
     const userIds = [...new Set(chats.map((chat) => chat.userId))];
-    const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
+    let profiles = [];
+    const { data: directoryProfiles, error: profileError } = await supabase
+        .from(PROFILE_DIRECTORY)
         .select('id, username, avatar_url')
         .in('id', userIds);
 
-    if (profileError || !profiles?.length) {
-        renderDmEmptyState();
-        return null;
+    if (profileError) {
+        console.warn('[dm-list] profile_directory:', profileError.message);
+        const { data: fallbackProfiles, error: fallbackError } = await supabase
+            .from('profiles')
+            .select('id, username, avatar_url')
+            .in('id', userIds);
+        if (fallbackError) {
+            console.warn('[dm-list] profiles yedek:', fallbackError.message);
+        } else {
+            profiles = fallbackProfiles || [];
+        }
+    } else {
+        profiles = directoryProfiles || [];
     }
 
     const profileMap = Object.fromEntries(profiles.map((p) => [p.id, p]));
@@ -3181,20 +3356,23 @@ async function loadDmHistory() {
 
     for (const chat of chats) {
         const profile = profileMap[chat.userId];
-        if (!profile) continue;
+        const username = profile?.username
+            || partnerNameFromLastMessage(chat.lastMsg, chat.userId)
+            || dmTitles.get(chat.userId)
+            || 'Kullanıcı';
 
         dmConversations.set(chat.userId, chat.conversationId);
-        dmTitles.set(chat.userId, profile.username);
+        dmTitles.set(chat.userId, username);
 
         addDmToSidebar(
             chat.userId,
-            profile.username,
+            username,
             previewFromMessage({
                 body: chat.lastMsg.body,
                 contentType: chat.lastMsg.content_type || 'text',
                 isOutgoing: chat.lastMsg.sender_id === currentUserId
             }),
-            profile.avatar_url,
+            profile?.avatar_url || null,
             {
                 lastTime: chat.lastMsg.created_at,
                 append: true
@@ -3204,10 +3382,13 @@ async function loadDmHistory() {
 
     const first = chats[0];
     const firstProfile = profileMap[first.userId];
-    if (first && firstProfile) {
+    const firstUsername = firstProfile?.username
+        || partnerNameFromLastMessage(first?.lastMsg, first?.userId)
+        || 'Kullanıcı';
+    if (first) {
         mostRecentDmChat = {
             userId: first.userId,
-            username: firstProfile.username,
+            username: firstUsername,
             conversationId: first.conversationId
         };
     }
