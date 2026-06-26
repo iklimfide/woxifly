@@ -42,7 +42,6 @@ const MIME = {
 };
 
 const API_HANDLERS = [
-    { pattern: /^\/api\/media-sign$/, module: 'media-sign', jsonBody: true },
     { pattern: /^\/api\/media\/(.+)$/, module: 'media-serve', query: (m) => ({ key: decodeURIComponent(m[1]) }) },
     { pattern: /^\/api\/upload$/, module: 'upload' },
     { pattern: /^\/api\/cloud$/, module: 'cloud' },

@@ -1,5 +1,4 @@
 import { displayMediaUrl } from './urls.js';
-import { ensureSignedMediaUrl } from './sign.js';
 
 let historyPushed = false;
 
@@ -39,35 +38,28 @@ export function openViewer(url, kind = 'image', mediaR2Key = null) {
     const { root, image, video, title, external } = els();
     if (!root || !url) return;
 
+    const resolved = displayMediaUrl(url, mediaR2Key) || url;
     const isVideo = kind === 'video';
 
     if (image) {
         image.hidden = isVideo;
-        image.src = isVideo ? '' : '';
+        image.src = isVideo ? '' : resolved;
     }
 
     if (video) {
         video.hidden = !isVideo;
-        if (!isVideo) {
+        if (isVideo) {
+            video.src = resolved;
+            video.load();
+        } else {
             video.pause();
             video.removeAttribute('src');
             video.load();
         }
     }
 
-    void ensureSignedMediaUrl(url, mediaR2Key).then((signed) => {
-        const resolved = signed || displayMediaUrl(url, mediaR2Key) || url;
-        if (!root.classList.contains('open')) return;
-
-        if (image && !isVideo) image.src = resolved;
-        if (video && isVideo) {
-            video.src = resolved;
-            video.load();
-        }
-        if (external) external.href = resolved;
-    });
-
     if (title) title.textContent = isVideo ? 'Video önizleme' : 'Görsel önizleme';
+    if (external) external.href = resolved;
 
     root.classList.add('open');
     root.setAttribute('aria-hidden', 'false');

@@ -151,7 +151,6 @@ import {
 } from './user-blocks.js';
 import { initSearchPanel, openSearchPanel, closeSearchPanel } from './search-panel.js';
 import { PROFILE_DIRECTORY } from './profile-directory.js';
-import { collectMediaKeysFromMessages, signMediaPaths, signMediaInContainer } from './media/sign.js';
 
 let currentUserId = null;
 let pendingForward = null;
@@ -1599,24 +1598,18 @@ function handleIncomingBroadcast(payload) {
 
     if (contentType !== 'text' && !mediaUrl) return;
 
-    const signPromise = contentType !== 'text'
-        ? signMediaPaths([{ media_url: payload.media_url, r2_key: payload.r2_key }])
-        : Promise.resolve();
-
-    void signPromise.then(() => {
-        appendMessageToUI({
-            sender: payload.sender_name || 'Kullanıcı',
-            body: payload.body || '',
-            time: formatTime(payload.created_at),
-            createdAt: payload.created_at,
-            isOutgoing: false,
-            senderId: payload.sender_id || null,
-            contentType,
-            mediaUrl,
-            mediaR2Key: payload.r2_key || null,
-            clientId: payload.client_id || null,
-            quote: payload.quote || null
-        });
+    appendMessageToUI({
+        sender: payload.sender_name || 'Kullanıcı',
+        body: payload.body || '',
+        time: formatTime(payload.created_at),
+        createdAt: payload.created_at,
+        isOutgoing: false,
+        senderId: payload.sender_id || null,
+        contentType,
+        mediaUrl,
+        mediaR2Key: payload.r2_key || null,
+        clientId: payload.client_id || null,
+        quote: payload.quote || null
     });
 
     notifyIncomingDmMessage(payload, currentConversationId);
@@ -1806,34 +1799,31 @@ function renderMessageHistoryRows(container, ordered, {
         return;
     }
 
-    void signMediaPaths(collectMediaKeysFromMessages(ordered)).then(() => {
-        let lastDayKey = null;
-        const fragment = document.createDocumentFragment();
+    let lastDayKey = null;
+    const fragment = document.createDocumentFragment();
 
-        ordered.forEach((msg) => {
-            const dayKey = getCalendarDayKey(msg.created_at);
-            if (dayKey && dayKey !== lastDayKey) {
-                fragment.appendChild(createMessageDateSeparator(msg.created_at));
-                lastDayKey = dayKey;
-            }
-            fragment.appendChild(createMessageHistoryElement(msg, { profileMap, reactionsByMessage }));
-        });
-
-        if (prepend) {
-            const prevScrollHeight = container.scrollHeight;
-            const prependedCount = ordered.length;
-            const lastPrependedDayKey = getCalendarDayKey(ordered[ordered.length - 1].created_at);
-            container.insertBefore(fragment, container.firstChild);
-            fixPrependedDateSeparatorBoundary(container, prependedCount, lastPrependedDayKey);
-            container.scrollTop = container.scrollHeight - prevScrollHeight;
-        } else {
-            container.appendChild(fragment);
-            if (autoScroll) container.scrollTop = container.scrollHeight;
+    ordered.forEach((msg) => {
+        const dayKey = getCalendarDayKey(msg.created_at);
+        if (dayKey && dayKey !== lastDayKey) {
+            fragment.appendChild(createMessageDateSeparator(msg.created_at));
+            lastDayKey = dayKey;
         }
-
-        refreshSelectionUi(container);
-        void signMediaInContainer(container);
+        fragment.appendChild(createMessageHistoryElement(msg, { profileMap, reactionsByMessage }));
     });
+
+    if (prepend) {
+        const prevScrollHeight = container.scrollHeight;
+        const prependedCount = ordered.length;
+        const lastPrependedDayKey = getCalendarDayKey(ordered[ordered.length - 1].created_at);
+        container.insertBefore(fragment, container.firstChild);
+        fixPrependedDateSeparatorBoundary(container, prependedCount, lastPrependedDayKey);
+        container.scrollTop = container.scrollHeight - prevScrollHeight;
+    } else {
+        container.appendChild(fragment);
+        if (autoScroll) container.scrollTop = container.scrollHeight;
+    }
+
+    refreshSelectionUi(container);
 }
 
 async function fetchMessageHistoryBatch(conversationId, { before = null } = {}) {
@@ -2432,10 +2422,6 @@ async function dispatchOutgoingMessage({
         conversation_id: currentConversationId,
         quote: serializedQuote
     };
-
-    if (hasMedia && r2Key) {
-        await signMediaPaths([r2Key]);
-    }
 
     if (!skipAppend) {
         appendMessageToUI({

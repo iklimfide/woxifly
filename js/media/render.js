@@ -1,6 +1,5 @@
 import { openViewer } from './viewer.js';
-import { displayMediaUrl, getMediaDisplayUrls, mediaR2KeyFromMessage } from './urls.js';
-import { ensureSignedMediaUrl, mediaPathNeedsSignature } from './sign.js';
+import { displayMediaUrl, getMediaDisplayUrls } from './urls.js';
 import { createVoiceMessagePlayer } from '../voice-message-ui.js';
 
 function el(tag, className, text) {
@@ -16,6 +15,12 @@ function pickVideoPosterTime(duration) {
     return Math.min(Math.max(duration * 0.1, 0.25), 2);
 }
 
+function resolveMediaSrc(src, r2Key = null) {
+    if (!src) return null;
+    if (String(src).startsWith('blob:')) return src;
+    return displayMediaUrl(src, r2Key) || src;
+}
+
 function markThumbFailed(card) {
     if (card.classList.contains('media-card--error')) return;
     card.dataset.mediaFailed = '1';
@@ -26,30 +31,10 @@ function markThumbFailed(card) {
     }
 }
 
-async function resolveProtectedMediaSrc(src, r2Key = null) {
-    if (!src) return null;
-    if (String(src).startsWith('blob:')) return src;
-
-    const path = mediaR2KeyFromMessage(src, r2Key);
-    if (path && mediaPathNeedsSignature(path)) {
-        return ensureSignedMediaUrl(src, r2Key);
-    }
-
-    return displayMediaUrl(src, r2Key) || src;
-}
-
 function applyMediaSrc(el, src, r2Key) {
-    if (!src) return Promise.resolve(null);
-    if (String(src).startsWith('blob:')) {
-        el.src = src;
-        return Promise.resolve(src);
-    }
-
-    return resolveProtectedMediaSrc(src, r2Key).then((finalSrc) => {
-        if (!finalSrc || !el.isConnected) return finalSrc || null;
-        el.src = finalSrc;
-        return finalSrc;
-    });
+    const finalSrc = resolveMediaSrc(src, r2Key);
+    if (finalSrc && el) el.src = finalSrc;
+    return finalSrc;
 }
 
 function bindVideoPosterSeek(video) {
@@ -90,7 +75,7 @@ function createThumbElement(kind) {
     return img;
 }
 
-async function handleThumbLoadError(card, thumb, src, mediaR2Key = null) {
+function handleThumbLoadError(card, thumb, src, mediaR2Key = null) {
     if (card.classList.contains('media-card--error')) return;
     if (card.dataset.mediaFailed === '1') return;
 
@@ -98,26 +83,14 @@ async function handleThumbLoadError(card, thumb, src, mediaR2Key = null) {
     const host = card.closest('.message-media');
     const r2Key = mediaR2Key || host?.dataset.mediaR2Key || null;
     const source = host?.dataset.mediaSrc || src;
-
-    if (card.dataset.mediaSignRetry !== '1') {
-        card.dataset.mediaSignRetry = '1';
-        const signed = await resolveProtectedMediaSrc(source, r2Key);
-        if (signed && thumb?.isConnected && thumb.src !== signed) {
-            thumb.src = signed;
-            return;
-        }
-    }
-
     const candidates = getMediaDisplayUrls(source, r2Key);
     const next = retry + 1;
 
-    if (thumb && next <= candidates.length) {
-        for (let i = next; i < candidates.length; i += 1) {
-            const candidate = candidates[i];
-            const signedCandidate = await resolveProtectedMediaSrc(candidate, r2Key);
-            if (!signedCandidate || signedCandidate === thumb.src) continue;
-            card.dataset.mediaRetry = String(i);
-            thumb.src = signedCandidate;
+    if (thumb && next < candidates.length) {
+        const nextSrc = candidates[next];
+        if (nextSrc && nextSrc !== thumb.src) {
+            card.dataset.mediaRetry = String(next);
+            thumb.src = nextSrc;
             return;
         }
     }
@@ -129,25 +102,20 @@ function mountReadyThumb(card, kind, src, mediaR2Key = null) {
     const thumb = createThumbElement(kind);
     card.appendChild(thumb);
 
-    void applyMediaSrc(thumb, src, mediaR2Key).then((finalSrc) => {
-        if (!thumb.isConnected) return;
-        if (!finalSrc) {
-            markThumbFailed(card);
-            return;
-        }
+    const finalSrc = applyMediaSrc(thumb, src, mediaR2Key);
+    if (!finalSrc) {
+        markThumbFailed(card);
+        return;
+    }
 
-        const onError = () => {
-            void handleThumbLoadError(card, thumb, src, mediaR2Key);
-        };
+    const onError = () => handleThumbLoadError(card, thumb, src, mediaR2Key);
 
-        if (kind === 'video') {
-            card.classList.add('media-card--video');
-            bindVideoPosterSeek(thumb);
-            thumb.addEventListener('error', onError);
-        } else {
-            thumb.addEventListener('error', onError);
-        }
-    });
+    if (kind === 'video') {
+        card.classList.add('media-card--video');
+        bindVideoPosterSeek(thumb);
+    }
+
+    thumb.addEventListener('error', onError);
 }
 
 function makeMediaCard() {
@@ -184,16 +152,14 @@ export function renderMediaBlock(host, { kind, src, state = 'ready', mediaR2Key 
             URL.revokeObjectURL(previousSrc);
         }
 
-        const resolved = displayMediaUrl(src) || src;
+        const resolved = resolveMediaSrc(src, mediaR2Key);
         const canPreview = state === 'ready' || (state === 'pending' && resolved?.startsWith('blob:'));
-        void resolveProtectedMediaSrc(src, mediaR2Key).then((signedSrc) => {
-            const player = createVoiceMessagePlayer({
-                src: canPreview ? (signedSrc || resolved) : null,
-                state,
-                seed: resolved || host.dataset.clientId || 'voice'
-            });
-            host.appendChild(player);
+        const player = createVoiceMessagePlayer({
+            src: canPreview ? resolved : null,
+            state,
+            seed: resolved || host.dataset.clientId || 'voice'
         });
+        host.appendChild(player);
         return;
     }
 
@@ -208,7 +174,7 @@ export function renderMediaBlock(host, { kind, src, state = 'ready', mediaR2Key 
         if (src) {
             const thumb = createThumbElement(kind);
             card.appendChild(thumb);
-            void applyMediaSrc(thumb, src, mediaR2Key);
+            applyMediaSrc(thumb, src, mediaR2Key);
         }
         card.appendChild(el('span', 'media-card-label', 'Yükleniyor...'));
         host.appendChild(card);

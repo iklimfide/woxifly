@@ -121,11 +121,6 @@ export function toBroadcastMediaUrl(input) {
     const mediaPath = extractMediaPath(input);
     if (!mediaPath) return null;
 
-    if (R2_PUBLIC_BASE_URL) {
-        return `${R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${mediaPath}`;
-    }
-
-    if (input.startsWith('http://') || input.startsWith('https://')) return input;
     if (input.startsWith(`${MEDIA_BASE}/`)) return input;
     return `${MEDIA_BASE}/${mediaPath}`;
 }

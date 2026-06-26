@@ -1,5 +1,4 @@
 import { headMedia, readMedia, r2KeyFromProxyPath } from './_lib/media-store.js';
-import { verifyMediaSignature } from './_lib/media-sign.js';
 
 const IMAGE_PREFIX_RE = /^(?:images|avatars)\//;
 
@@ -78,16 +77,6 @@ export default async function handler(req, res) {
     if (!key) {
         res.status(403).json({ error: 'Geçersiz medya yolu.' });
         return;
-    }
-
-    const isAvatar = key.startsWith('avatars/');
-    if (!isAvatar) {
-        const exp = req.query.exp;
-        const sig = req.query.sig;
-        if (!verifyMediaSignature(key, exp, sig)) {
-            res.status(403).json({ error: 'Geçersiz veya süresi dolmuş medya bağlantısı.' });
-            return;
-        }
     }
 
     let bodyStream = null;
