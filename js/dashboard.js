@@ -3342,6 +3342,22 @@ async function loadDmHistory() {
         .sort((a, b) => new Date(b.lastMsg.created_at) - new Date(a.lastMsg.created_at));
 
     if (!chats.length) {
+        if (dmConvIds.length) {
+            const { data: probe, error: probeError } = await supabase
+                .from('messages')
+                .select('id')
+                .in('conversation_id', dmConvIds)
+                .is('deleted_at', null)
+                .limit(1);
+            if (probeError) {
+                console.error('[dm-list] mesaj RLS hatası:', probeError.message, probeError.code);
+            } else if (!probe?.length) {
+                console.error(
+                    '[dm-list] DM üyeliği var ama mesaj okunamıyor. '
+                    + 'Supabase\'de supabase/fix-restore-dm-access.sql dosyasını çalıştırın.'
+                );
+            }
+        }
         renderDmEmptyState();
         return null;
     }

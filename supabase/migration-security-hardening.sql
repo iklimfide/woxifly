@@ -1,5 +1,8 @@
 -- Woxifly güvenlik sertleştirme (DM odaklı; grup/oda kaldırıldı)
 -- Supabase Dashboard > SQL Editor'da bir kez çalıştırın.
+--
+-- ÖNCE çalıştırın: migration-user-blocks.sql, migration-message-delete-for-me.sql
+-- Mesajlar kaybolursa: fix-restore-dm-access.sql
 
 -- ---------------------------------------------------------------------------
 -- 1) Profiller: hassas sütunları gizle, herkese açık dizin görünümü
