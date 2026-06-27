@@ -27,7 +27,16 @@ function formatNotificationSubtitle({ count = 1 }) {
 }
 
 function applyNotificationSubtitle(item) {
-    item.subtitle = formatNotificationSubtitle({ count: item.count });
+    item.subtitle = item.read
+        ? 'Okundu'
+        : formatNotificationSubtitle({ count: item.count || 1 });
+}
+
+function markItemRead(item, readAt = new Date().toISOString()) {
+    item.read = true;
+    item.readAt = readAt;
+    item.count = 0;
+    applyNotificationSubtitle(item);
 }
 
 function consolidateItemsByMergeKey() {
@@ -51,7 +60,8 @@ function consolidateItemsByMergeKey() {
             continue;
         }
 
-        existing.count = (existing.count || 1) + (item.count || 1);
+        existing.count = (existing.read ? 0 : (existing.count || 1))
+            + (item.read ? 0 : (item.count || 1));
         existing.read = existing.read && item.read;
 
         const existingTime = new Date(existing.createdAt).getTime();
@@ -112,26 +122,30 @@ function loadItems() {
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) return;
         items.length = 0;
+        let normalized = false;
         parsed.forEach((item) => {
             if (!item?.id || !item?.chatId) return;
             const senderId = item.senderId || null;
+            const read = !!item.read;
+            if (read && (item.count || 1) > 0) normalized = true;
             items.push({
                 id: item.id,
                 chatId: item.chatId,
                 mergeKey: item.mergeKey || notificationMergeKey({ chatId: item.chatId, senderId }),
                 senderId,
                 title: item.title || 'Sohbet',
-                count: item.count || 1,
+                count: read ? 0 : (item.count || 1),
                 subtitle: item.subtitle || 'Yeni bildirim',
                 createdAt: item.createdAt || new Date().toISOString(),
                 readAt: item.readAt || null,
-                read: !!item.read,
+                read,
                 lastMessageId: item.lastMessageId || null,
                 lastClientId: item.lastClientId || null,
                 route: item.route || routeFromChatId(item.chatId)
             });
         });
         items.forEach((item) => applyNotificationSubtitle(item));
+        if (normalized) persistItems();
     } catch {
         items.length = 0;
     }
@@ -275,8 +289,7 @@ function markAllRead() {
     const now = new Date().toISOString();
     items.forEach((item) => {
         if (!item.read) {
-            item.read = true;
-            item.readAt = now;
+            markItemRead(item, now);
             changed = true;
         }
     });
@@ -290,8 +303,7 @@ function markAllRead() {
 
 function handleItemClick(item) {
     if (!item.read) {
-        item.read = true;
-        item.readAt = new Date().toISOString();
+        markItemRead(item);
         persistItems();
         updateBadge();
     }
@@ -382,8 +394,7 @@ export function markNotificationsReadForChat(chatId, senderId = null) {
         const matchesChat = chatId && item.chatId === chatId;
         const matchesSender = senderId && item.senderId === senderId;
         if (matchesChat || matchesSender) {
-            item.read = true;
-            item.readAt = now;
+            markItemRead(item, now);
             changed = true;
         }
     });
@@ -409,7 +420,9 @@ export function addInAppNotification({
     senderId = null,
     senderName = null,
     messageId = null,
-    clientId = null
+    clientId = null,
+    subtitle = null,
+    incrementCount = true
 }) {
     if (!chatId) return;
 
@@ -423,7 +436,12 @@ export function addInAppNotification({
 
     if (existingIndex !== -1) {
         const item = items[existingIndex];
-        item.count = (item.count || 1) + 1;
+        const wasRead = item.read;
+        if (incrementCount) {
+            item.count = wasRead ? 1 : (item.count || 1) + 1;
+        } else {
+            item.count = wasRead ? 1 : (item.count || 1);
+        }
         item.createdAt = now;
         item.read = false;
         item.readAt = null;
@@ -432,7 +450,7 @@ export function addInAppNotification({
         item.senderId = senderId || item.senderId;
         item.lastMessageId = messageId || item.lastMessageId;
         item.lastClientId = clientId || item.lastClientId;
-        applyNotificationSubtitle(item);
+        item.subtitle = subtitle || formatNotificationSubtitle({ count: item.count || 1 });
         item.route = routeFromChatId(chatId);
         items.splice(existingIndex, 1);
         items.unshift(item);
@@ -449,9 +467,9 @@ export function addInAppNotification({
             readAt: null,
             lastMessageId: messageId || null,
             lastClientId: clientId || null,
-            route: routeFromChatId(chatId)
+            route: routeFromChatId(chatId),
+            subtitle: subtitle || formatNotificationSubtitle({ count: 1 })
         };
-        applyNotificationSubtitle(item);
         items.unshift(item);
     }
 

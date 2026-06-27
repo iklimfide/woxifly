@@ -76,6 +76,7 @@ import {
     parseNotifyQueryParam,
     clearNotifyQueryParam,
     maybeShowForegroundNotification,
+    maybeShowReactionForegroundNotification,
     isPushSupported
 } from './push-notifications.js';
 import {
@@ -1632,8 +1633,80 @@ function refreshDmNotificationListeners() {
     const conversationIds = [...new Set(dmConversations.values())];
     syncDmNotificationRooms(supabase, conversationIds, {
         activeConversationId: currentConversationId,
-        onMessage: handleIncomingDmNotification
+        onMessage: handleIncomingDmNotification,
+        onReaction: handleIncomingReactionNotification
     });
+}
+
+async function isReactionOnMyMessage(payload) {
+    const messageEl = findMessageElement({
+        messageId: payload.message_id || null,
+        clientId: payload.client_id || null
+    });
+    if (messageEl) return messageEl.classList.contains('outgoing');
+    if (!payload.message_id) return false;
+
+    const { data: msg } = await supabase
+        .from('messages')
+        .select('sender_id')
+        .eq('id', payload.message_id)
+        .maybeSingle();
+
+    return msg?.sender_id === currentUserId;
+}
+
+async function resolveReactorUsername(reactorId) {
+    let reactorName = dmTitles.get(reactorId);
+    if (reactorName) return reactorName;
+
+    const { data } = await supabase
+        .from(PROFILE_DIRECTORY)
+        .select('username')
+        .eq('id', reactorId)
+        .maybeSingle();
+
+    reactorName = data?.username || 'Birisi';
+    dmTitles.set(reactorId, reactorName);
+    return reactorName;
+}
+
+async function notifyIncomingReaction(payload, conversationId) {
+    if (!payload?.emoji || !payload?.user_id || payload.action === 'remove') return;
+    if (payload.user_id === currentUserId) return;
+    if (isUserBlocked(payload.user_id)) return;
+    if (!(await isReactionOnMyMessage(payload))) return;
+
+    const reactorId = payload.user_id;
+    const reactorName = await resolveReactorUsername(reactorId);
+    const partnerUserId = getUserIdForConversation(conversationId) || reactorId;
+    const chatId = `User-${partnerUserId}`;
+    if (!chatId.startsWith('User-')) return;
+
+    const chatPanelActive = document.getElementById('chat-panel')?.classList.contains('active');
+    const notifyOpts = {
+        viewingConversationId: chatPanelActive ? currentConversationId : null,
+        messageConversationId: conversationId
+    };
+
+    maybeShowReactionForegroundNotification({
+        reactorName,
+        emoji: payload.emoji,
+        userId: reactorId,
+        ...notifyOpts
+    });
+
+    if (shouldCaptureInAppNotification(notifyOpts)) {
+        addInAppNotification({
+            chatId,
+            title: reactorName,
+            senderId: reactorId,
+            senderName: reactorName,
+            messageId: payload.message_id || null,
+            clientId: payload.client_id || null,
+            subtitle: `Mesajınıza ${payload.emoji} tepkisi verdi`,
+            incrementCount: false
+        });
+    }
 }
 
 function notifyIncomingDmMessage(payload, conversationId) {
@@ -1684,6 +1757,16 @@ function handleIncomingReactionBroadcast(payload) {
     if (payload.user_id === currentUserId) return;
     if (payload.user_id && isUserBlocked(payload.user_id)) return;
     handleIncomingReaction(payload, currentUserId);
+    void notifyIncomingReaction(payload, currentConversationId);
+}
+
+function handleIncomingReactionNotification(payload, conversationId) {
+    if (!payload?.emoji || !payload?.user_id) return;
+    if (!isSafeReactionEmoji(payload.emoji)) return;
+    if (payload.user_id === currentUserId) return;
+    if (payload.user_id && isUserBlocked(payload.user_id)) return;
+    handleIncomingReaction(payload, currentUserId);
+    void notifyIncomingReaction(payload, conversationId);
 }
 
 function handleIncomingDeleteBroadcast(payload) {
@@ -2999,8 +3082,8 @@ async function toggleMessageReaction({ messageId, clientId, emoji }) {
     const messageEl = findMessageElement({ messageId: resolvedMessageId, clientId });
 
     if (!resolvedMessageId) {
-        const minePill = messageEl?.querySelector('.message-reaction-pill.mine');
-        action = minePill?.dataset.emoji === emoji ? 'remove' : 'add';
+        const mineReaction = messageEl?.querySelector('.message-reaction.mine');
+        action = mineReaction?.dataset.emoji === emoji ? 'remove' : 'add';
     } else {
         const { data: existing } = await supabase
             .from('message_reactions')

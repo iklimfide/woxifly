@@ -1,4 +1,4 @@
-import { formatQuotePreview, formatQuoteAuthorLabel, appendTextWithLinks } from './utils.js';
+import { formatQuotePreview, formatQuoteAuthorLabel, appendTextWithLinks, fillReactionEmoji } from './utils.js';
 import { displayMediaUrl } from './media/urls.js';
 import { showToast } from './notify-modal.js';
 import { resizeMessageInput } from './media/composer.js';
@@ -286,29 +286,26 @@ export function updateMessageReactions(messageEl, reactionList) {
 
     bar.replaceChildren();
     for (const item of reactionList) {
-        const pill = document.createElement('button');
-        pill.type = 'button';
-        pill.className = `message-reaction-pill${item.mine ? ' mine' : ''}`;
-        pill.dataset.emoji = item.emoji;
-        pill.title = `${item.count} tepki`;
-        fillReactionPill(pill, item.emoji, item.count);
-        pill.addEventListener('click', (event) => {
-            event.stopPropagation();
-            handleReactionPick(messageEl, item.emoji);
-        });
-        bar.appendChild(pill);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `message-reaction${item.mine ? ' mine' : ''}`;
+        btn.dataset.emoji = item.emoji;
+        btn.title = item.emoji;
+        btn.setAttribute('aria-label', `Tepki: ${item.emoji}`);
+        fillReactionEmoji(btn, item.emoji, item.count);
+        bar.appendChild(btn);
     }
 }
 
 function getMessageReactionState(messageEl) {
     const state = new Map();
-    messageEl.querySelectorAll('.message-reaction-pill').forEach((pill) => {
-        const emoji = pill.dataset.emoji;
-        const count = Number.parseInt(pill.querySelector('.message-reaction-count')?.textContent || '0', 10);
+    messageEl.querySelectorAll('.message-reaction').forEach((btn) => {
+        const emoji = btn.dataset.emoji;
+        const count = Number.parseInt(btn.dataset.count || '1', 10);
         state.set(emoji, {
             emoji,
             count,
-            mine: pill.classList.contains('mine')
+            mine: btn.classList.contains('mine')
         });
     });
     return state;
@@ -993,6 +990,15 @@ export function initMessageInteractions({
                 messageId: quoteNav.dataset.quoteMessageId || null,
                 clientId: quoteNav.dataset.quoteClientId || null
             });
+            return;
+        }
+
+        const reactionBtn = event.target.closest('.message-reaction');
+        if (reactionBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            const messageEl = reactionBtn.closest('.message');
+            if (messageEl) handleReactionPick(messageEl, reactionBtn.dataset.emoji);
             return;
         }
 

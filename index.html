@@ -540,7 +540,7 @@
             flex-shrink: 0;
         }
         
-        .message { width: fit-content; max-width: min(88vw, 340px); font-size: 17px; line-height: 1.35; word-break: break-word; overflow-wrap: anywhere; }
+        .message { width: fit-content; max-width: min(88vw, 340px); font-size: 17px; line-height: 1.35; word-break: break-word; overflow-wrap: anywhere; position: relative; overflow: visible; }
         .message-frame {
             display: flex;
             align-items: flex-start;
@@ -554,6 +554,8 @@
             border-radius: var(--message-bubble-radius);
             background-color: var(--message-bubble-bg);
             box-shadow: var(--message-bubble-shadow);
+            position: relative;
+            overflow: visible;
         }
         .message-sender { font-size: 0.72rem; font-weight: 700; color: var(--accent-color); margin-bottom: 3px; display: block; }
         .message-sender.clickable { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
@@ -684,34 +686,42 @@
         .message.outgoing .message-quote--self .message-quote-body { color: #3f5e3d; }
 
         .message-reactions {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            transform: translateY(55%);
             display: flex;
             flex-wrap: wrap;
-            gap: 4px;
-            margin-top: 4px;
+            justify-content: flex-end;
+            gap: 2px;
+            max-width: 100%;
+            pointer-events: auto;
+            z-index: 5;
+            line-height: 1;
         }
-        .message-reaction-pill {
+        .message.incoming .message-reactions {
+            right: 38px;
+        }
+        .message-reaction {
             display: inline-flex;
             align-items: center;
-            gap: 3px;
-            padding: 2px 7px;
-            border-radius: 999px;
-            border: 1px solid var(--border-color);
-            background: #fff;
-            font-size: 0.72rem;
+            justify-content: center;
+            border: none;
+            background: none;
+            padding: 0;
+            margin: 0;
+            min-width: 1.1rem;
+            min-height: 1.1rem;
+            font-size: 1.05rem;
+            line-height: 1;
             cursor: pointer;
-            line-height: 1.2;
+            color: inherit;
+            -webkit-appearance: none;
+            appearance: none;
+            font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
         }
-        .message-reaction-pill.mine {
-            border-color: #93c5fd;
-            background: #eff6ff;
-        }
-        .message.outgoing .message-reaction-pill {
-            background: rgba(255, 255, 255, 0.72);
-        }
-        .message-reaction-count {
-            font-size: 0.62rem;
-            color: var(--text-muted);
-            font-weight: 600;
+        .message:has(.message-reactions) {
+            margin-bottom: 12px;
         }
 
         .message-actions-bar {

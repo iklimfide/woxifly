@@ -2,15 +2,10 @@ import { openLink } from './link-viewer.js';
 import { resolveMessageMediaUrl, isMediaKind } from './media/urls.js';
 import { createMediaHost } from './media/render.js';
 
-function fillReactionPill(pill, emoji, count) {
-    pill.replaceChildren();
-    const emojiSpan = document.createElement('span');
-    emojiSpan.className = 'message-reaction-emoji';
-    emojiSpan.textContent = emoji;
-    const countSpan = document.createElement('span');
-    countSpan.className = 'message-reaction-count';
-    countSpan.textContent = String(count);
-    pill.append(emojiSpan, countSpan);
+export function fillReactionEmoji(el, emoji, count) {
+    el.replaceChildren();
+    el.textContent = emoji;
+    el.dataset.count = String(count);
 }
 
 export function sanitizeText(value, maxLength = 2000) {
@@ -237,23 +232,23 @@ function createMessageActionsToggle() {
     return rail;
 }
 
-function appendReactionsBar(wrapper, reactions) {
-    if (!reactions?.length) return;
+function appendReactionsBar(anchor, reactions) {
+    if (!reactions?.length || !anchor) return;
 
     const bar = document.createElement('div');
     bar.className = 'message-reactions';
 
     for (const item of reactions) {
-        const pill = document.createElement('button');
-        pill.type = 'button';
-        pill.className = `message-reaction-pill${item.mine ? ' mine' : ''}`;
-        pill.dataset.emoji = item.emoji;
-        pill.title = `${item.count} tepki`;
-        fillReactionPill(pill, item.emoji, item.count);
-        bar.appendChild(pill);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `message-reaction${item.mine ? ' mine' : ''}`;
+        btn.dataset.emoji = item.emoji;
+        btn.title = item.emoji;
+        fillReactionEmoji(btn, item.emoji, item.count);
+        bar.appendChild(btn);
     }
 
-    wrapper.appendChild(bar);
+    anchor.appendChild(bar);
 }
 
 export function createMessageElement({

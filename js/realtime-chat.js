@@ -35,7 +35,11 @@ export function leaveDmNotificationRooms() {
 /**
  * Açık olmayan DM sohbetlerinde gelen mesajlar için arka plan dinleyicileri.
  */
-export function syncDmNotificationRooms(supabase, conversationIds, { activeConversationId = null, onMessage } = {}) {
+export function syncDmNotificationRooms(supabase, conversationIds, {
+    activeConversationId = null,
+    onMessage,
+    onReaction
+} = {}) {
     supabaseClient = supabase;
     const targetIds = new Set((conversationIds || []).filter(Boolean));
 
@@ -60,6 +64,8 @@ export function syncDmNotificationRooms(supabase, conversationIds, { activeConve
             if (notificationSeenClientIds.has(payload.client_id)) return;
             notificationSeenClientIds.add(payload.client_id);
             onMessage?.(payload, convId);
+        }).on('broadcast', { event: 'reaction' }, ({ payload }) => {
+            onReaction?.(payload, convId);
         }).subscribe();
 
         notificationChannels.set(convId, channel);

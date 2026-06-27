@@ -173,6 +173,41 @@ export function buildNotificationDataFromPayload(payload) {
     return null;
 }
 
+export function maybeShowReactionForegroundNotification({
+    reactorName,
+    emoji,
+    userId,
+    viewingConversationId = null,
+    messageConversationId = null
+} = {}) {
+    if (!pushSupported || !profilePushEnabled || Notification.permission !== 'granted') return;
+    if (!emoji || !userId) return;
+
+    const chatPanelActive = document.getElementById('chat-panel')?.classList.contains('active');
+    const viewingSameChat = chatPanelActive
+        && viewingConversationId
+        && messageConversationId
+        && viewingConversationId === messageConversationId;
+    if (!document.hidden && document.hasFocus() && viewingSameChat) return;
+
+    const tag = `${buildNotificationTag({ userId })}-reaction`;
+    const displayName = reactorName || 'Birisi';
+
+    const notification = new Notification(displayName, {
+        body: `Mesajınıza ${emoji} tepkisi verdi`,
+        icon: '/icons/icon-192.png',
+        tag,
+        renotify: true,
+        data: { userId }
+    });
+
+    notification.onclick = () => {
+        window.focus();
+        notification.close();
+        window.dispatchEvent(new CustomEvent('woxifly:notification-click', { detail: { userId } }));
+    };
+}
+
 export function maybeShowForegroundNotification(payload, {
     viewingConversationId = null,
     messageConversationId = null
