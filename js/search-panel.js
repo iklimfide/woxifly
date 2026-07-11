@@ -1,4 +1,5 @@
 import { supabase } from './supabase-client.js';
+import { getMessageRetentionCutoffIso } from './config.js';
 import { resolveAvatarMediaUrl, displayMediaUrl } from './media/urls.js';
 import { closeTopbarMenus } from './topbar.js';
 import { PROFILE_DIRECTORY } from './profile-directory.js';
@@ -200,6 +201,7 @@ async function searchMessagesInChat(query, conversationId) {
         .select('id, body, created_at, sender_id, sender_username, content_type, deleted_at')
         .eq('conversation_id', conversationId)
         .is('deleted_at', null)
+        .gte('created_at', getMessageRetentionCutoffIso())
         .ilike('body', `%${term}%`)
         .order('created_at', { ascending: false })
         .limit(40);

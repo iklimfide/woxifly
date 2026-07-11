@@ -27,3 +27,21 @@ export function getLocationCoords() {
 
 /** Tek seferde yüklenen mesaj sayfası (yukarı kaydırınca daha eski mesajlar eklenir). */
 export const MESSAGE_HISTORY_LIMIT = 50;
+
+/** Mesaj geçmişi saklama süresi (gün). Bu süreden eski mesajlar gösterilmez ve silinir. */
+export const MESSAGE_RETENTION_DAYS = 7;
+export const MESSAGE_RETENTION_MS = MESSAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+export function getMessageRetentionCutoffDate() {
+    return new Date(Date.now() - MESSAGE_RETENTION_MS);
+}
+
+export function getMessageRetentionCutoffIso() {
+    return getMessageRetentionCutoffDate().toISOString();
+}
+
+export function isWithinMessageRetention(createdAt) {
+    if (!createdAt) return false;
+    const ts = new Date(createdAt).getTime();
+    return Number.isFinite(ts) && ts >= getMessageRetentionCutoffDate().getTime();
+}

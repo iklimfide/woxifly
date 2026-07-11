@@ -105,6 +105,24 @@ export function parseAppRoute() {
     return parseAppPath(window.location.pathname);
 }
 
+export function isStandalonePwa() {
+    return window.matchMedia('(display-mode: standalone)').matches
+        || window.navigator.standalone === true;
+}
+
+/** PWA kısayolundan açılışta sohbet URL'lerini anasayfaya çevir (bildirim deeplink hariç). */
+export function shouldForcePwaHomeStart({ hasNotifyRoute = false } = {}) {
+    if (!isStandalonePwa() || hasNotifyRoute) return false;
+
+    const route = parseAppRoute();
+    if (!route) return true;
+
+    if (route.view === 'chats-home') return false;
+    if (route.view === 'profile-panel' || route.view === 'bulut-panel') return false;
+
+    return true;
+}
+
 export function replaceAppPath(path) {
     const qs = window.location.search;
     const target = `${path}${qs}`;

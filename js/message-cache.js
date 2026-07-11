@@ -1,6 +1,12 @@
+import { isWithinMessageRetention } from './config.js';
+
 const CACHE_VERSION = 1;
 const STORAGE_PREFIX = `woxifly:msg-hist:v${CACHE_VERSION}`;
 const MAX_CONVERSATIONS = 15;
+
+function filterRetainedMessages(messages = []) {
+    return messages.filter((message) => isWithinMessageRetention(message.created_at));
+}
 
 function bucketKey(userId) {
     return `${STORAGE_PREFIX}:${userId || 'anon'}`;
@@ -55,20 +61,32 @@ export function getCachedMessageHistory(userId, conversationId) {
     const entry = readBucket(userId)[conversationId];
     if (!entry?.messages?.length) return null;
 
+    const messages = filterRetainedMessages(entry.messages);
+    if (!messages.length) return null;
+
+    const messageIds = new Set(messages.map((message) => message.id));
+    const reactionRows = (entry.reactionRows || []).filter((row) => messageIds.has(row.message_id));
+
     return {
-        messages: entry.messages,
-        reactionRows: entry.reactionRows || []
+        messages,
+        reactionRows
     };
 }
 
 export function setCachedMessageHistory(userId, conversationId, { messages, reactionRows = [] }) {
     if (!conversationId || !messages?.length) return;
 
+    const retainedMessages = filterRetainedMessages(messages);
+    if (!retainedMessages.length) return;
+
+    const messageIds = new Set(retainedMessages.map((message) => message.id));
+    const retainedReactions = (reactionRows || []).filter((row) => messageIds.has(row.message_id));
+
     const bucket = trimBucket(readBucket(userId));
     bucket[conversationId] = {
         savedAt: Date.now(),
-        messages,
-        reactionRows
+        messages: retainedMessages,
+        reactionRows: retainedReactions
     };
     writeBucket(userId, bucket);
 }

@@ -25,7 +25,9 @@ import {
 import { compressImageForAvatar, compressImageForChat } from './media/compress-image.js';
 import {
     DEFAULT_LOCATION,
-    MESSAGE_HISTORY_LIMIT
+    MESSAGE_HISTORY_LIMIT,
+    getMessageRetentionCutoffIso,
+    isWithinMessageRetention
 } from './config.js';
 import {
     joinDmRoom,
@@ -59,6 +61,7 @@ import {
     addInAppNotification,
     markNotificationsReadForChat,
     removeNotificationsForDeletedMessages,
+    removeNotificationsForChat,
     shouldCaptureInAppNotification,
     closeNotificationDropdown,
     setNotificationUser
@@ -102,6 +105,8 @@ import {
     findMessageElement,
     enterSelectionMode,
     exitSelectionMode,
+    selectAllMessages,
+    getSelectableMessageCount,
     getSelectedMessageKeys,
     isSelectionMode,
     refreshSelectionUi,
@@ -116,6 +121,8 @@ import {
 import {
     buildAppPath,
     parseAppRoute,
+    shouldForcePwaHomeStart,
+    isStandalonePwa,
     usernameToSlug,
     replaceAppPath,
     pushAppPath
@@ -190,13 +197,19 @@ function saveAppRoute() {
         ? viewingMemberProfileUsername
         : null;
 
-    replaceAppPath(buildAppPath({
+    let path = buildAppPath({
         activePanel,
         currentActiveChat,
         username,
         profileUsername,
         memberProfileUsername
-    }));
+    });
+
+    if (isStandalonePwa() && activePanel === 'chat-panel' && currentActiveChat?.startsWith('User-')) {
+        path = '/';
+    }
+
+    replaceAppPath(path);
 }
 
 async function resolveUserBySlug(slug) {
@@ -750,6 +763,90 @@ async function handleBlockUser(userId, username = 'Kullanıcı') {
 
     await refreshBlockedUsersList();
     updateMessageInputState();
+}
+
+async function hideConversationMessagesForMe(conversationId) {
+    const { data: hiddenCount, error } = await supabase.rpc('hide_dm_conversation_for_me', {
+        p_conversation_id: conversationId
+    });
+
+    if (!error) return hiddenCount ?? 0;
+
+    if (!/hide_dm_conversation_for_me/i.test(error.message || '')) {
+        throw error;
+    }
+
+    let totalHidden = 0;
+    let cursor = null;
+
+    while (true) {
+        let query = supabase
+            .from('messages')
+            .select('id, created_at')
+            .eq('conversation_id', conversationId)
+            .is('deleted_at', null)
+            .order('created_at', { ascending: true })
+            .limit(500);
+
+        if (cursor) query = query.gt('created_at', cursor);
+
+        const { data: rows, error: fetchError } = await query;
+        if (fetchError) throw fetchError;
+        if (!rows?.length) break;
+
+        const messageIds = rows.map((row) => row.id).filter(Boolean);
+        const { data: batchHidden, error: hideError } = await supabase.rpc('hide_messages_for_me', {
+            p_message_ids: messageIds
+        });
+        if (hideError) throw hideError;
+
+        totalHidden += batchHidden ?? 0;
+        cursor = rows[rows.length - 1].created_at;
+        if (rows.length < 500) break;
+    }
+
+    return totalHidden;
+}
+
+async function handleDeleteConversation(userId, username = 'Kullanıcı') {
+    if (!isLoggedIn()) {
+        promptLogin();
+        return;
+    }
+
+    if (!userId) return;
+
+    const conversationId = dmConversations.get(userId)
+        || await findExistingDmPartnerConversationId(userId);
+
+    const confirmed = await showConfirmToast(
+        `${username} ile sohbeti silmek istiyor musunuz? Mesajlar yalnızca sizin görünümünüzden kaldırılır.`,
+        { confirmLabel: 'Sil', cancelLabel: 'İptal', type: 'warning' }
+    );
+    if (!confirmed) return;
+
+    try {
+        if (conversationId) {
+            await hideConversationMessagesForMe(conversationId);
+            clearCachedMessageHistory(currentUserId, conversationId);
+        }
+
+        removeDmFromSidebar(userId, { keepConversation: true });
+        removeNotificationsForChat(`User-${userId}`, userId);
+        refreshDmNotificationListeners();
+
+        if (currentActiveChat === `User-${userId}`) {
+            leaveRealtimeRoom();
+            currentConversationId = null;
+            currentActiveChat = null;
+            await showChatListHome();
+        }
+
+        showNotify('Sohbet silindi.', { title: 'Sil', type: 'success' });
+    } catch (err) {
+        console.warn('[dm-delete]', err);
+        showNotify(err.message || 'Sohbet silinemedi.', { title: 'Sil', type: 'error' });
+    }
 }
 
 async function refreshBlockedUsersList() {
@@ -1354,6 +1451,7 @@ function appendMessageToUI({
     });
 
     appendMessageToContainer(container, messageEl, createdAt || new Date().toISOString());
+    if (createdAt) messageEl.dataset.createdAt = createdAt;
     container.scrollTop = container.scrollHeight;
     if (isSelectionMode()) {
         refreshSelectionUi(container);
@@ -1853,7 +1951,64 @@ function createMessageHistoryElement(msg, { profileMap = {}, reactionsByMessage 
     });
     const dayKey = getCalendarDayKey(msg.created_at);
     if (dayKey) messageEl.dataset.dayKey = dayKey;
+    if (msg.created_at) messageEl.dataset.createdAt = msg.created_at;
     return messageEl;
+}
+
+function filterRetainedHistoryMessages(messages = []) {
+    return (messages || []).filter((message) => isWithinMessageRetention(message.created_at));
+}
+
+function cleanupOrphanDateSeparators(container) {
+    if (!container) return;
+
+    container.querySelectorAll('.message-date-separator').forEach((separator) => {
+        let next = separator.nextElementSibling;
+        while (next && !next.classList.contains('message')) {
+            next = next.nextElementSibling;
+        }
+        if (!next) separator.remove();
+    });
+}
+
+function purgeExpiredMessagesFromDom() {
+    const container = document.getElementById('messageContainer');
+    if (!container) return false;
+
+    let removed = false;
+    container.querySelectorAll('.message').forEach((messageEl) => {
+        const createdAt = messageEl.dataset.createdAt;
+        if (!createdAt || isWithinMessageRetention(createdAt)) return;
+        messageEl.remove();
+        removed = true;
+    });
+
+    if (!removed) return false;
+
+    cleanupOrphanDateSeparators(container);
+
+    if (!container.querySelector('.message')) {
+        showEmptyChat();
+    }
+
+    return true;
+}
+
+function initMessageRetentionSweep() {
+    const runSweep = () => {
+        if (purgeExpiredMessagesFromDom() && currentConversationId) {
+            void refreshPartnerSidebarAfterMessageChange(
+                currentActiveChat?.startsWith('User-')
+                    ? currentActiveChat.replace('User-', '')
+                    : null
+            );
+        }
+    };
+
+    window.setInterval(runSweep, 60 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) runSweep();
+    });
 }
 
 function fixPrependedDateSeparatorBoundary(container, prependedCount, lastPrependedDayKey) {
@@ -1914,6 +2069,7 @@ async function fetchMessageHistoryBatch(conversationId, { before = null } = {}) 
         .from('messages')
         .select(MESSAGE_HISTORY_SELECT)
         .eq('conversation_id', conversationId)
+        .gte('created_at', getMessageRetentionCutoffIso())
         .order('created_at', { ascending: false })
         .limit(MESSAGE_HISTORY_LIMIT);
 
@@ -1922,7 +2078,7 @@ async function fetchMessageHistoryBatch(conversationId, { before = null } = {}) 
     const { data: messages, error } = await query;
     if (error) throw error;
 
-    const ordered = [...(messages || [])].reverse();
+    const ordered = filterRetainedHistoryMessages([...(messages || [])].reverse());
     const senderIds = [...new Set(ordered.filter((m) => !m.sender_username).map((m) => m.sender_id))];
     const messageIds = ordered.map((m) => m.id);
 
@@ -1946,6 +2102,8 @@ async function fetchMessageHistoryBatch(conversationId, { before = null } = {}) 
         profileMap: Object.fromEntries((profilesResult.data || []).map((p) => [p.id, p.username])),
         reactionRows: reactionsResult.data || [],
         hasMore: (messages || []).length === MESSAGE_HISTORY_LIMIT
+            && ordered.length > 0
+            && isWithinMessageRetention(ordered[0].created_at)
     };
 }
 
@@ -2110,7 +2268,8 @@ async function loadMessageHistory(conversationId) {
         messageHistoryOldestAt = batch.ordered[0].created_at;
 
         const oldestFresh = batch.ordered[0].created_at;
-        const olderCached = (cached?.messages || []).filter((m) => m.created_at < oldestFresh);
+        const olderCached = filterRetainedHistoryMessages(cached?.messages || [])
+            .filter((message) => message.created_at < oldestFresh);
         const mergedOrdered = olderCached.length
             ? [...olderCached, ...batch.ordered]
             : batch.ordered;
@@ -2143,9 +2302,10 @@ async function loadMessageHistory(conversationId) {
         });
 
         setCachedMessageHistory(currentUserId, conversationId, {
-            messages: mergedOrdered,
+            messages: filterRetainedHistoryMessages(mergedOrdered),
             reactionRows: mergedReactionRows
         });
+        purgeExpiredMessagesFromDom();
     } catch (err) {
         if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
         console.error('[woxifly] loadMessageHistory failed:', err);
@@ -2402,6 +2562,7 @@ async function deleteSelectedMessages(scope = 'me') {
 function updateSelectionBarUi(count = null) {
     const bar = document.getElementById('messageSelectionBar');
     const countEl = document.getElementById('messageSelectionCount');
+    const selectAllBtn = document.getElementById('messageSelectionSelectAllBtn');
     const hideBtn = document.getElementById('messageSelectionHideBtn');
     const deleteEveryoneBtn = document.getElementById('messageSelectionDeleteEveryoneBtn');
     const container = document.getElementById('messageContainer');
@@ -2409,9 +2570,12 @@ function updateSelectionBarUi(count = null) {
     const selectedCount = count ?? getSelectedMessageKeys().size;
     const active = isSelectionMode();
     const hasOwnOutgoing = getSelectedMessageTargets().some((target) => target.isOutgoing);
+    const selectableCount = getSelectableMessageCount(container);
+    const allSelected = selectableCount > 0 && selectedCount >= selectableCount;
 
     bar?.toggleAttribute('hidden', !active);
     if (countEl) countEl.textContent = `${selectedCount} seçildi`;
+    if (selectAllBtn) selectAllBtn.disabled = !active || allSelected || selectableCount < 1;
     if (hideBtn) hideBtn.disabled = selectedCount < 1;
     if (deleteEveryoneBtn) deleteEveryoneBtn.disabled = selectedCount < 1 || !hasOwnOutgoing;
     container?.classList.toggle('selection-mode', active);
@@ -2419,9 +2583,16 @@ function updateSelectionBarUi(count = null) {
 
 function initMessageSelectionControls() {
     const messageContainer = document.getElementById('messageContainer');
+    const selectAllBtn = document.getElementById('messageSelectionSelectAllBtn');
     const hideBtn = document.getElementById('messageSelectionHideBtn');
     const deleteEveryoneBtn = document.getElementById('messageSelectionDeleteEveryoneBtn');
     const cancelBtn = document.getElementById('messageSelectionCancelBtn');
+
+    selectAllBtn?.addEventListener('click', () => {
+        if (!messageContainer) return;
+        selectAllMessages(messageContainer);
+        updateSelectionBarUi();
+    });
 
     hideBtn?.addEventListener('click', () => {
         deleteSelectedMessages('me');
@@ -3272,6 +3443,234 @@ function syncDmSidebarPreview(chatId, payload, isOutgoing) {
     updateDmSidebarPreview(userId, preview, createdAt);
 }
 
+let chatContextMenuEl = null;
+let chatContextMenuOpen = false;
+let chatContextMenuDismissUntil = 0;
+let suppressChatItemOpen = false;
+let chatListLongPressTimer = null;
+let chatListInteractionsBound = false;
+
+function ensureChatContextMenu() {
+    if (chatContextMenuEl) return chatContextMenuEl;
+
+    const menu = document.createElement('div');
+    menu.className = 'message-context-menu chat-context-menu';
+    menu.hidden = true;
+    menu.setAttribute('role', 'menu');
+    document.body.appendChild(menu);
+    chatContextMenuEl = menu;
+    return menu;
+}
+
+function closeChatContextMenu() {
+    if (!chatContextMenuEl) return;
+    chatContextMenuEl.hidden = true;
+    chatContextMenuEl.replaceChildren();
+    chatContextMenuOpen = false;
+}
+
+function canDismissChatContextMenu() {
+    return chatContextMenuOpen && Date.now() >= chatContextMenuDismissUntil;
+}
+
+function createChatContextMenuItem({ icon, label, danger = false, onClick }) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `message-context-item${danger ? ' message-context-item--danger' : ''}`;
+    btn.setAttribute('role', 'menuitem');
+    btn.innerHTML = `<span class="message-context-icon" aria-hidden="true">${icon}</span><span class="message-context-label">${label}</span>`;
+    btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        onClick();
+        closeChatContextMenu();
+    });
+    return btn;
+}
+
+function appendChatContextDivider(menu) {
+    menu.appendChild(document.createElement('div')).className = 'message-context-divider';
+}
+
+function positionChatContextMenu(menu, anchorEl, clientX, clientY) {
+    menu.hidden = false;
+    menu.removeAttribute('hidden');
+    menu.style.display = 'block';
+    menu.style.visibility = 'hidden';
+    menu.style.left = '0';
+    menu.style.top = '0';
+
+    const menuRect = menu.getBoundingClientRect();
+    const anchorRect = anchorEl.getBoundingClientRect();
+    const padding = 10;
+
+    let left = Number.isFinite(clientX) ? clientX : anchorRect.left + anchorRect.width / 2 - menuRect.width / 2;
+    let top = Number.isFinite(clientY) ? clientY : anchorRect.top + anchorRect.height / 2 - menuRect.height / 2;
+
+    left = Math.max(padding, Math.min(left, window.innerWidth - menuRect.width - padding));
+    top = Math.max(padding, Math.min(top, window.innerHeight - menuRect.height - padding));
+
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    menu.style.visibility = 'visible';
+}
+
+function resolveChatListItem(target) {
+    return target?.closest?.('.chat-item') || null;
+}
+
+function getChatItemMeta(item) {
+    const userId = item.id?.replace(/^user-/, '') || '';
+    const username = item.querySelector('.chat-name')?.textContent?.trim()
+        || dmTitles.get(userId)
+        || 'Kullanıcı';
+    return { userId, username };
+}
+
+async function showChatContextMenuForItem(item, clientX, clientY) {
+    const { userId, username } = getChatItemMeta(item);
+    if (!userId) return;
+
+    chatContextMenuDismissUntil = Date.now() + 500;
+    suppressChatItemOpen = true;
+    window.setTimeout(() => {
+        suppressChatItemOpen = false;
+    }, 700);
+
+    const menu = ensureChatContextMenu();
+    menu.replaceChildren();
+
+    const status = await fetchBlockStatus(userId);
+
+    menu.appendChild(createChatContextMenuItem({
+        icon: '💬',
+        label: 'Mesajları aç',
+        onClick: () => {
+            void openChat(`User-${userId}`, username);
+            closeSidebar();
+        }
+    }));
+
+    menu.appendChild(createChatContextMenuItem({
+        icon: '👤',
+        label: 'Profili gör',
+        onClick: () => {
+            void openMemberProfile(userId, { push: true, fromChat: false });
+            if (isMobileLayout()) closeSidebar();
+        }
+    }));
+
+    appendChatContextDivider(menu);
+
+    menu.appendChild(createChatContextMenuItem({
+        icon: '🚫',
+        label: status.blockedByMe ? 'Engeli kaldır' : 'Engelle',
+        danger: !status.blockedByMe,
+        onClick: () => {
+            void handleBlockUser(userId, username);
+        }
+    }));
+
+    appendChatContextDivider(menu);
+
+    menu.appendChild(createChatContextMenuItem({
+        icon: '🗑',
+        label: 'Sil',
+        danger: true,
+        onClick: () => {
+            void handleDeleteConversation(userId, username);
+        }
+    }));
+
+    positionChatContextMenu(menu, item, clientX, clientY);
+    chatContextMenuOpen = true;
+    chatContextMenuDismissUntil = Date.now() + 500;
+
+    if (navigator.vibrate) {
+        try { navigator.vibrate(12); } catch { /* ignore */ }
+    }
+}
+
+function initChatListInteractions() {
+    if (chatListInteractionsBound) return;
+
+    const list = document.getElementById('myActiveChatsList');
+    if (!list) return;
+
+    list.addEventListener('click', (event) => {
+        const item = resolveChatListItem(event.target);
+        if (!item) return;
+
+        if (suppressChatItemOpen) {
+            suppressChatItemOpen = false;
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+
+        if (chatContextMenuOpen) {
+            closeChatContextMenu();
+            return;
+        }
+
+        const { userId, username } = getChatItemMeta(item);
+        if (!userId) return;
+
+        void openChat(`User-${userId}`, username);
+        closeSidebar();
+    });
+
+    list.addEventListener('contextmenu', (event) => {
+        const item = resolveChatListItem(event.target);
+        if (!item) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        void showChatContextMenuForItem(item, event.clientX, event.clientY);
+    });
+
+    const cancelChatListLongPress = () => {
+        if (chatListLongPressTimer) {
+            window.clearTimeout(chatListLongPressTimer);
+            chatListLongPressTimer = null;
+        }
+    };
+
+    list.addEventListener('touchstart', (event) => {
+        const item = resolveChatListItem(event.target);
+        if (!item) return;
+
+        const touch = event.changedTouches?.[0] || event.touches?.[0];
+        const touchX = touch?.clientX ?? 0;
+        const touchY = touch?.clientY ?? 0;
+
+        cancelChatListLongPress();
+        chatListLongPressTimer = window.setTimeout(() => {
+            chatListLongPressTimer = null;
+            void showChatContextMenuForItem(item, touchX, touchY);
+        }, 380);
+    }, { passive: true });
+
+    list.addEventListener('touchend', cancelChatListLongPress);
+    list.addEventListener('touchmove', cancelChatListLongPress);
+    list.addEventListener('touchcancel', cancelChatListLongPress);
+
+    list.addEventListener('scroll', () => {
+        if (chatContextMenuOpen) closeChatContextMenu();
+    }, { passive: true });
+
+    document.addEventListener('pointerdown', (event) => {
+        if (!canDismissChatContextMenu()) return;
+        if (event.target.closest('.chat-context-menu')) return;
+        closeChatContextMenu();
+    }, true);
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && chatContextMenuOpen) closeChatContextMenu();
+    });
+
+    chatListInteractionsBound = true;
+}
+
 function addDmToSidebar(userId, username, preview = '', avatarUrl = null, {
     lastTime = null,
     append = false
@@ -3282,10 +3681,6 @@ function addDmToSidebar(userId, username, preview = '', avatarUrl = null, {
     const item = document.createElement('div');
     item.className = 'chat-item';
     item.id = `user-${userId}`;
-    item.addEventListener('click', () => {
-        openChat(`User-${userId}`, username);
-        closeSidebar();
-    });
 
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
@@ -3330,6 +3725,7 @@ async function fetchLastDmMessage(conversationId) {
         .from('messages')
         .select('conversation_id, body, content_type, sender_id, sender_username, receiver_username, created_at')
         .eq('conversation_id', conversationId)
+        .gte('created_at', getMessageRetentionCutoffIso())
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -3623,6 +4019,7 @@ async function initDashboard() {
     }
     runInitStep('initMediaComposer', initMediaComposer);
     runInitStep('initMessageHistoryScroll', initMessageHistoryScroll);
+    runInitStep('initMessageRetentionSweep', initMessageRetentionSweep);
     runInitStep('initMessageInteractions', () => initMessageInteractions({
         messageContainer: document.getElementById('messageContainer'),
         isLoggedIn,
@@ -3639,6 +4036,7 @@ async function initDashboard() {
         showNotify
     }));
     runInitStep('initMessageSelectionControls', initMessageSelectionControls);
+    runInitStep('initChatListInteractions', initChatListInteractions);
     document.getElementById('appHomeLink')?.addEventListener('click', (event) => {
         event.preventDefault();
         showChatListHome();
@@ -3690,15 +4088,25 @@ async function initDashboard() {
     refreshTopbarMenu();
 
     if (session) {
-        const route = parseAppRoute();
-        if (route) {
-            await restoreAppRoute(route);
+        const notifyRoute = parseNotifyQueryParam();
+
+        if (notifyRoute) {
+            clearNotifyQueryParam();
+            await openChatFromNotification(notifyRoute);
+            saveAppRoute();
+        } else if (shouldForcePwaHomeStart()) {
+            replaceAppPath('/');
+            await showChatListHome();
             saveAppRoute();
         } else {
-            await openDefaultStartupChat();
+            const route = parseAppRoute();
+            if (route) {
+                await restoreAppRoute(route);
+                saveAppRoute();
+            } else {
+                await openDefaultStartupChat();
+            }
         }
-
-        await handleStartupNotificationRoute();
     }
 
     const params = new URLSearchParams(window.location.search);

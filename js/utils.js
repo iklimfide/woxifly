@@ -189,12 +189,14 @@ export function appendTextWithLinks(parent, text) {
         }
 
         if (href) {
+            const copyUrl = trimTrailingUrlPunctuation(rawUrl);
             const displayUrl = formatUrlDisplayLabel(href, rawUrl);
             const link = document.createElement('a');
             link.className = 'message-link';
             link.href = href;
             link.textContent = displayUrl;
-            link.title = trimTrailingUrlPunctuation(rawUrl);
+            link.title = copyUrl;
+            link.dataset.copyUrl = copyUrl;
             link.addEventListener('click', (event) => {
                 event.preventDefault();
                 openLink(href);
@@ -214,6 +216,31 @@ export function appendTextWithLinks(parent, text) {
     if (!parent.childNodes.length) {
         parent.textContent = text;
     }
+}
+
+export function extractPlainTextWithFullUrls(root) {
+    if (!root) return '';
+
+    const parts = [];
+    const walk = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            parts.push(node.textContent);
+            return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+        if (node.matches?.('a.message-link')) {
+            parts.push(node.dataset.copyUrl || node.title || node.href || node.textContent);
+            return;
+        }
+
+        for (const child of node.childNodes) {
+            walk(child);
+        }
+    };
+
+    walk(root);
+    return parts.join('');
 }
 
 function createMessageActionsToggle() {

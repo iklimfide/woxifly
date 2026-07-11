@@ -414,6 +414,27 @@ export function removeNotificationsForDeletedMessages({ messageIds = [], clientI
     renderMenu();
 }
 
+export function removeNotificationsForChat(chatId, senderId = null) {
+    if (!chatId && !senderId) return;
+
+    let changed = false;
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+        const item = items[i];
+        const matchesChat = chatId && item.chatId === chatId;
+        const matchesSender = senderId && item.senderId === senderId;
+        if (matchesChat || matchesSender) {
+            items.splice(i, 1);
+            changed = true;
+        }
+    }
+
+    if (!changed) return;
+
+    persistItems();
+    updateBadge();
+    renderMenu();
+}
+
 export function addInAppNotification({
     chatId,
     title,

@@ -3,6 +3,12 @@ import { verifyAuthToken } from './_lib/auth.js';
 import { isAdminUser, describeAdminDenial } from './_lib/admin.js';
 import { getSupabaseServiceConfig } from './_lib/env.js';
 
+const MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+function messageRetentionCutoffIso() {
+    return new Date(Date.now() - MESSAGE_RETENTION_MS).toISOString();
+}
+
 function sendJson(res, status, body) {
     res.setHeader('Cache-Control', 'private, no-store, max-age=0');
     res.setHeader('Pragma', 'no-cache');
@@ -128,6 +134,7 @@ async function handleConversations(client, query, res) {
         .from('messages')
         .select('conversation_id, body, created_at, content_type, deleted_at')
         .in('conversation_id', convIds)
+        .gte('created_at', messageRetentionCutoffIso())
         .order('created_at', { ascending: false });
 
     if (msgError) {
@@ -293,6 +300,7 @@ async function handleMessages(client, query, res) {
         .from('messages')
         .select('id, body, created_at, sender_id, sender_username, content_type, media_url, r2_key, deleted_at, client_id')
         .eq('conversation_id', conversationId)
+        .gte('created_at', messageRetentionCutoffIso())
         .order('created_at', { ascending: false })
         .limit(limit);
 

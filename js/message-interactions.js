@@ -1,4 +1,4 @@
-import { formatQuotePreview, formatQuoteAuthorLabel, appendTextWithLinks, fillReactionEmoji } from './utils.js';
+import { formatQuotePreview, formatQuoteAuthorLabel, appendTextWithLinks, fillReactionEmoji, extractPlainTextWithFullUrls } from './utils.js';
 import { displayMediaUrl } from './media/urls.js';
 import { showToast } from './notify-modal.js';
 import { resizeMessageInput } from './media/composer.js';
@@ -87,6 +87,37 @@ export function enterSelectionMode({ messageContainer, initialMessageEl = null }
 
     refreshSelectionUi(messageContainer);
     onSelectionChange?.(selectedMessageKeys.size);
+}
+
+export function selectAllMessages(messageContainer) {
+    if (!selectionMode || !messageContainer) return 0;
+
+    let added = 0;
+    messageContainer.querySelectorAll('.message').forEach((messageEl) => {
+        const key = messageSelectionKey(messageEl);
+        if (!key) return;
+        if (!selectedMessageKeys.has(key)) added += 1;
+        selectedMessageKeys.add(key);
+        messageEl.classList.add('is-selected');
+        const checkbox = messageEl.querySelector('.message-select-checkbox');
+        if (checkbox) checkbox.checked = true;
+    });
+
+    onSelectionChange?.(selectedMessageKeys.size);
+    return added;
+}
+
+function countSelectableMessages(messageContainer) {
+    if (!messageContainer) return 0;
+    let count = 0;
+    messageContainer.querySelectorAll('.message').forEach((messageEl) => {
+        if (messageSelectionKey(messageEl)) count += 1;
+    });
+    return count;
+}
+
+export function getSelectableMessageCount(messageContainer) {
+    return countSelectableMessages(messageContainer);
 }
 
 export function exitSelectionMode(messageContainer) {
@@ -470,7 +501,8 @@ async function copyMessageText(messageEl) {
 }
 
 function getMessageCopyText(messageEl) {
-    const body = messageEl.querySelector('.message-body')?.textContent?.trim();
+    const bodyEl = messageEl.querySelector('.message-body');
+    const body = bodyEl ? extractPlainTextWithFullUrls(bodyEl).trim() : '';
     if (body) return body;
 
     const contentType = messageEl.dataset.contentType;
@@ -482,6 +514,33 @@ function getMessageCopyText(messageEl) {
     if (quoteBody) return quoteBody;
 
     return '';
+}
+
+function getSelectionCopyTextWithFullUrls(container) {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || selection.isCollapsed) return null;
+
+    const anchorNode = selection.anchorNode;
+    if (!anchorNode || !container.contains(anchorNode)) return null;
+
+    const resolveLink = (node) => {
+        if (!node) return null;
+        if (node.nodeType === Node.ELEMENT_NODE) return node.closest?.('a.message-link');
+        return node.parentElement?.closest?.('a.message-link') || null;
+    };
+
+    const anchorLink = resolveLink(anchorNode);
+    const focusLink = resolveLink(selection.focusNode);
+    if (anchorLink && focusLink && anchorLink === focusLink) {
+        return anchorLink.dataset.copyUrl || anchorLink.title || anchorLink.href || anchorLink.textContent;
+    }
+
+    const range = selection.getRangeAt(0);
+    const fragment = range.cloneContents();
+    const wrapper = document.createElement('div');
+    wrapper.appendChild(fragment);
+    const text = extractPlainTextWithFullUrls(wrapper).trim();
+    return text || null;
 }
 
 function extensionForDownload(contentType, mimeType = '') {
@@ -713,6 +772,14 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
     }));
 
     menu.appendChild(createContextMenuItem({
+        icon: '📋',
+        label: 'Kopyala',
+        onClick: () => {
+            copyMessageText(messageEl);
+        }
+    }));
+
+    menu.appendChild(createContextMenuItem({
         icon: '↪',
         label: 'İlet',
         onClick: () => {
@@ -791,6 +858,20 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
         }
     }));
 
+    menu.appendChild(createContextMenuItem({
+        icon: '☑',
+        label: 'Tümünü seç',
+        onClick: () => {
+            if (!ctx?.isLoggedIn?.()) {
+                ctx?.promptLogin?.();
+                return;
+            }
+            const container = messageEl.closest('#messageContainer');
+            enterSelectionMode({ messageContainer: container });
+            selectAllMessages(container);
+        }
+    }));
+
     if (getMessageMediaSrc(messageEl)) {
         menu.appendChild(createContextMenuItem({
             icon: '⬇',
@@ -800,14 +881,6 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
             }
         }));
     }
-
-    menu.appendChild(createContextMenuItem({
-        icon: '📋',
-        label: 'Kopyala',
-        onClick: () => {
-            copyMessageText(messageEl);
-        }
-    }));
 
     positionContextMenu(menu, messageEl, clientX, clientY);
     contextMenuIsOpen = true;
@@ -1023,6 +1096,14 @@ export function initMessageInteractions({
 
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') closeActiveActions();
+    });
+
+    messageContainer.addEventListener('copy', (event) => {
+        const text = getSelectionCopyTextWithFullUrls(messageContainer);
+        if (!text) return;
+
+        event.preventDefault();
+        event.clipboardData.setData('text/plain', text);
     });
 
     messageContainer.addEventListener('touchstart', (event) => {

@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#2077c5">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Woxifly">
+    <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/favicon.png" type="image/png">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <title>Woxifly</title>
@@ -216,7 +220,7 @@
         .list-section-title { padding: 10px 16px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); background-color: #f7fafc; border-top: 1px solid var(--border-color); }
         .list-section-title:first-child { border-top: none; }
         
-        .chat-item { display: flex; align-items: center; padding: 14px 16px; cursor: pointer; border-bottom: 1px solid #e2e8f0; transition: background 0.2s; min-height: 72px; }
+        .chat-item { display: flex; align-items: center; padding: 14px 16px; cursor: pointer; border-bottom: 1px solid #e2e8f0; transition: background 0.2s; min-height: 72px; -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
         .chat-item:active, .chat-item.active { background-color: #f7fafc; }
         .chat-item.active { border-left: 4px solid var(--accent-color); padding-left: 12px; }
 
@@ -905,6 +909,7 @@
             align-self: flex-end;
             display: flex;
             align-items: center;
+            flex-wrap: wrap;
             gap: 10px;
             padding: 10px 14px;
             margin: 0 2px 6px;
@@ -3907,6 +3912,7 @@
             <div class="input-area" id="messageInputArea" hidden>
                 <div class="message-selection-bar" id="messageSelectionBar" hidden>
                     <span class="message-selection-count" id="messageSelectionCount">0 seçildi</span>
+                    <button type="button" class="message-selection-btn" id="messageSelectionSelectAllBtn" disabled>Tümünü seç</button>
                     <button type="button" class="message-selection-btn message-selection-btn--muted" id="messageSelectionHideBtn" disabled>Benden sil</button>
                     <button type="button" class="message-selection-btn message-selection-btn--danger" id="messageSelectionDeleteEveryoneBtn" disabled>Herkesten sil</button>
                     <button type="button" class="message-selection-btn" id="messageSelectionCancelBtn">İptal</button>
