@@ -3447,8 +3447,12 @@ let chatContextMenuEl = null;
 let chatContextMenuOpen = false;
 let chatContextMenuDismissUntil = 0;
 let suppressChatItemOpen = false;
+let suppressChatListContextMenu = false;
 let chatListLongPressTimer = null;
 let chatListInteractionsBound = false;
+let chatContextMenuShowId = 0;
+let chatContextMenuLastUserId = '';
+let chatContextMenuLastAt = 0;
 
 function ensureChatContextMenu() {
     if (chatContextMenuEl) return chatContextMenuEl;
@@ -3464,6 +3468,7 @@ function ensureChatContextMenu() {
 
 function closeChatContextMenu() {
     if (!chatContextMenuEl) return;
+    chatContextMenuShowId += 1;
     chatContextMenuEl.hidden = true;
     chatContextMenuEl.replaceChildren();
     chatContextMenuOpen = false;
@@ -3530,6 +3535,14 @@ async function showChatContextMenuForItem(item, clientX, clientY) {
     const { userId, username } = getChatItemMeta(item);
     if (!userId) return;
 
+    const now = Date.now();
+    if (userId === chatContextMenuLastUserId && now - chatContextMenuLastAt < 450) {
+        return;
+    }
+    chatContextMenuLastUserId = userId;
+    chatContextMenuLastAt = now;
+
+    const showId = ++chatContextMenuShowId;
     chatContextMenuDismissUntil = Date.now() + 500;
     suppressChatItemOpen = true;
     window.setTimeout(() => {
@@ -3540,6 +3553,9 @@ async function showChatContextMenuForItem(item, clientX, clientY) {
     menu.replaceChildren();
 
     const status = await fetchBlockStatus(userId);
+    if (showId !== chatContextMenuShowId) return;
+
+    menu.replaceChildren();
 
     menu.appendChild(createChatContextMenuItem({
         icon: '💬',
@@ -3625,6 +3641,14 @@ function initChatListInteractions() {
 
         event.preventDefault();
         event.stopPropagation();
+
+        if (suppressChatListContextMenu) {
+            suppressChatListContextMenu = false;
+            return;
+        }
+
+        if (chatContextMenuOpen) return;
+
         void showChatContextMenuForItem(item, event.clientX, event.clientY);
     });
 
@@ -3646,6 +3670,7 @@ function initChatListInteractions() {
         cancelChatListLongPress();
         chatListLongPressTimer = window.setTimeout(() => {
             chatListLongPressTimer = null;
+            suppressChatListContextMenu = true;
             void showChatContextMenuForItem(item, touchX, touchY);
         }, 380);
     }, { passive: true });
