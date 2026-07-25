@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyAuthToken } from './_lib/auth.js';
 import { isAdminUser, describeAdminDenial } from './_lib/admin.js';
 import { getSupabaseServiceConfig } from './_lib/env.js';
+import { formatCallLogAdminLine } from '../js/call-log-message.js';
 
 const MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -33,6 +34,8 @@ function previewBody(message) {
     if (type === 'video') return '🎬 Video';
     if (type === 'audio') return '🎙️ Ses';
     const body = (message.body || '').trim();
+    const callLine = formatCallLogAdminLine(body);
+    if (callLine) return callLine;
     if (!body) return 'Mesaj';
     return body.length > 120 ? `${body.slice(0, 120)}…` : body;
 }

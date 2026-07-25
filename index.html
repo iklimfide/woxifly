@@ -485,9 +485,10 @@
             width: 100%;
             display: flex;
             justify-content: center;
+            align-items: center;
             margin: 2px 0 4px;
-            pointer-events: none;
             flex-shrink: 0;
+            cursor: default;
         }
 
         .message-call-log-label {
@@ -986,12 +987,18 @@
             background: #e2e8f0;
         }
 
-        .message-container.selection-mode .message {
+        .message-container.selection-mode .message,
+        .message-container.selection-mode .message-call-log {
             cursor: pointer;
         }
-        .message.is-selected {
+        .message.is-selected,
+        .message-call-log.is-selected {
             outline: 2px solid #38bdf8;
             outline-offset: 2px;
+        }
+        .message-container.selection-mode .message-call-log:has(.message-select-checkbox) {
+            justify-content: flex-start;
+            width: 100%;
         }
         .message-select-checkbox {
             margin-right: 8px;
@@ -2577,6 +2584,46 @@
 
         .cloud-msg-row--outgoing {
             justify-content: flex-end;
+        }
+
+        .cloud-msg-row--call-log {
+            justify-content: center;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            margin: 8px 0;
+        }
+
+        .cloud-call-log-label {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            background: rgba(15, 23, 42, 0.08);
+            color: #334155;
+            font-size: 0.82rem;
+            font-weight: 600;
+        }
+
+        .cloud-call-log-meta {
+            font-size: 0.72rem;
+            color: #64748b;
+        }
+
+        .cloud-call-log-label--deleted {
+            border: 1px solid #feb2b2;
+            background: #fff5f5;
+            color: #c53030;
+        }
+
+        .cloud-msg-row--call-log-deleted .cloud-call-log-meta {
+            color: #c53030;
+        }
+
+        .cloud-msg__deleted-note {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #c53030;
+            margin-bottom: 6px;
         }
 
         .cloud-msg {

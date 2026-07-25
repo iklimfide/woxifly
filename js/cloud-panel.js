@@ -1,6 +1,7 @@
 import { formatTime, appendTextWithLinks, formatDisplayUsername } from './utils.js';
 import { resolveMessageMediaUrl, resolveAvatarMediaUrl, displayMediaUrl } from './media/urls.js';
 import { openViewer } from './media/viewer.js';
+import { parseCallLogBody, formatCallLogAdminLine } from './call-log-message.js';
 
 const CLOUD_PAGE_SIZE = 50;
 const CLOUD_MEMBERS_PAGE_SIZE = 50;
@@ -111,6 +112,8 @@ export async function refreshCloudAdminStatus() {
 }
 
 function formatMessageBody(message) {
+    const callLine = formatCallLogAdminLine(message.body || '');
+    if (callLine) return callLine;
     const type = message.contentType || 'text';
     if (type === 'image') return '📷 Görsel';
     if (type === 'video') return '🎬 Video';
@@ -326,7 +329,30 @@ function getCloudMessageSide(senderId) {
     return cloudSenderSideMap.get(normalized) || 'incoming';
 }
 
+function createCloudCallLogRow(message) {
+    const isDeleted = !!message.deletedAt;
+    const row = document.createElement('div');
+    row.className = 'cloud-msg-row cloud-msg-row--call-log' + (isDeleted ? ' cloud-msg-row--call-log-deleted' : '');
+
+    const label = document.createElement('div');
+    label.className = 'cloud-call-log-label' + (isDeleted ? ' cloud-call-log-label--deleted' : '');
+    label.textContent = formatCallLogAdminLine(message.body || '') || '📞 Sesli arama';
+
+    const meta = document.createElement('div');
+    meta.className = 'cloud-call-log-meta';
+    let metaText = `${formatDisplayUsername(message.senderName)} · ${formatDateLabel(message.createdAt)}`;
+    if (isDeleted) metaText += ' · herkesten silindi';
+    meta.textContent = metaText;
+
+    row.append(label, meta);
+    return row;
+}
+
 function createCloudMessageRow(message) {
+    if (parseCallLogBody(message.body || '')) {
+        return createCloudCallLogRow(message);
+    }
+
     const isDeleted = !!message.deletedAt;
     const side = getCloudMessageSide(message.senderId);
 
@@ -355,6 +381,10 @@ function createCloudMessageRow(message) {
     bodyWrap.className = 'cloud-msg__body';
 
     if (isDeleted) {
+        const deletedNote = document.createElement('div');
+        deletedNote.className = 'cloud-msg__deleted-note';
+        deletedNote.textContent = 'Herkesten silindi';
+        bodyWrap.appendChild(deletedNote);
         appendCloudMessageText(bodyWrap, message);
         bubble.append(head, bodyWrap);
         msg.appendChild(bubble);
@@ -391,6 +421,11 @@ function createCloudMessageRow(message) {
 }
 
 function appendCloudMessageText(parent, message) {
+    const callLine = formatCallLogAdminLine(message.body || '');
+    if (callLine) {
+        parent.textContent = callLine;
+        return;
+    }
     const text = (message.body || '').trim();
     if (text) {
         appendTextWithLinks(parent, text);

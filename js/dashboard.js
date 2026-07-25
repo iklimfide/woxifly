@@ -1321,13 +1321,21 @@ async function showChatListHome() {
 }
 
 async function loadProfile() {
-    const { data, error } = await supabase
+    const selectProfile = () => supabase
         .from('profiles')
-        .select('username, avatar_url, avatar_r2_key, about_me, home_location, job, marital_status')
+        .select('username, avatar_url, avatar_r2_key, about_me, home_location, job, marital_status, push_enabled')
         .eq('id', currentUserId)
         .single();
 
+    let { data, error } = await selectProfile();
+
+    if (error?.message?.toLowerCase().includes('permission denied')) {
+        await supabase.auth.refreshSession().catch(() => {});
+        ({ data, error } = await selectProfile());
+    }
+
     if (error) {
+        console.warn('[profile] profiles okunamadı:', error.message);
         await supabase.from('profiles').upsert({
             id: currentUserId,
             username: 'Kullanıcı',
@@ -2455,6 +2463,18 @@ async function deleteMessages(targets, scope = 'me') {
 
     if (!targets?.length) return;
 
+    const callLogTargets = targets.filter((t) => t.isCallLog);
+    const otherTargets = targets.filter((t) => !t.isCallLog);
+    if (callLogTargets.length && otherTargets.length) {
+        await deleteMessages(callLogTargets, 'everyone');
+        if (otherTargets.length) await deleteMessages(otherTargets, scope);
+        return;
+    }
+    if (callLogTargets.length && scope === 'me') {
+        await deleteMessages(callLogTargets, 'everyone');
+        return;
+    }
+
     const deleteScope = scope === 'everyone' ? 'everyone' : 'me';
     let { messageIds, clientIds } = deleteScope === 'me'
         ? await resolveMessageIdsWithRetry(targets)
@@ -2480,10 +2500,16 @@ async function deleteMessages(targets, scope = 'me') {
         }
 
         if (!deletedCount) {
-            showNotify('Herkesten silinecek mesaj bulunamadı. Yalnızca sizin gönderdiğiniz mesajlar silinir.', {
-                title: 'Herkesten sil',
-                type: 'warning'
-            });
+            const onlyCallLogs = targets.every((t) => t.isCallLog);
+            showNotify(
+                onlyCallLogs
+                    ? 'Arama kaydı silinemedi. Sohbet üyesi silme izni için Supabase\'de fix-soft-delete-participant.sql çalıştırılmış olmalı.'
+                    : 'Herkesten silinecek mesaj bulunamadı. Yalnızca sizin gönderdiğiniz mesajlar silinir.',
+                {
+                    title: onlyCallLogs ? 'Sil' : 'Herkesten sil',
+                    type: 'warning'
+                }
+            );
             return;
         }
 
@@ -2622,13 +2648,14 @@ function getSelectedMessageTargets() {
     const keys = getSelectedMessageKeys();
     const targets = [];
 
-    document.querySelectorAll('.message').forEach((el) => {
+    document.querySelectorAll('.message, .message-call-log').forEach((el) => {
         const key = el.dataset.messageId || el.dataset.clientId;
         if (key && keys.has(key)) {
             targets.push({
                 messageId: el.dataset.messageId || null,
                 clientId: el.dataset.clientId || null,
-                isOutgoing: el.classList.contains('outgoing')
+                isOutgoing: el.classList.contains('outgoing'),
+                isCallLog: el.classList.contains('message-call-log')
             });
         }
     });
@@ -2641,15 +2668,15 @@ async function deleteSelectedMessages(scope = 'me') {
     if (!targets.length) return;
 
     if (scope === 'everyone') {
-        const ownTargets = targets.filter((target) => target.isOutgoing);
-        if (!ownTargets.length) {
+        const everyoneTargets = targets.filter((target) => target.isOutgoing || target.isCallLog);
+        if (!everyoneTargets.length) {
             showNotify('Herkesten silmek için kendi gönderdiğiniz mesajları seçin.', {
                 title: 'Herkesten sil',
                 type: 'warning'
             });
             return;
         }
-        await deleteMessages(ownTargets, 'everyone');
+        await deleteMessages(everyoneTargets, 'everyone');
         return;
     }
 
@@ -2666,7 +2693,9 @@ function updateSelectionBarUi(count = null) {
 
     const selectedCount = count ?? getSelectedMessageKeys().size;
     const active = isSelectionMode();
-    const hasOwnOutgoing = getSelectedMessageTargets().some((target) => target.isOutgoing);
+    const hasOwnOutgoing = getSelectedMessageTargets().some(
+        (target) => target.isOutgoing || target.isCallLog
+    );
     const selectableCount = getSelectableMessageCount(container);
     const allSelected = selectableCount > 0 && selectedCount >= selectableCount;
 

@@ -72,6 +72,29 @@ export function formatCallLogLine(body, viewerUserId, time = '', { messageSender
     return t ? `${core}\u00a0·\u00a0${t}` : core;
 }
 
+/** Bulut YP / yönetici görünümü — tarafsız etiket */
+export function formatCallLogAdminText(body) {
+    const meta = parseCallLogBody(body);
+    if (!meta) return null;
+    switch (meta.outcome) {
+        case 'completed':
+            return `Görüşme · ${formatCallDuration(meta.durationSec)}`;
+        case 'declined':
+            return 'Arama reddedildi';
+        case 'no_answer':
+            return 'Cevapsız arama';
+        case 'cancelled':
+            return 'Arama iptal edildi';
+        default:
+            return 'Sesli arama';
+    }
+}
+
+export function formatCallLogAdminLine(body) {
+    const label = formatCallLogAdminText(body);
+    return label ? `📞 ${label}` : null;
+}
+
 export function createCallLogMessageElement({
     body,
     time,
@@ -87,6 +110,10 @@ export function createCallLogMessageElement({
     if (clientId) wrap.dataset.clientId = clientId;
     if (messageId) wrap.dataset.messageId = messageId;
     if (createdAt) wrap.dataset.createdAt = createdAt;
+    if (messageSenderId) wrap.dataset.senderId = messageSenderId;
+    if (viewerUserId && messageSenderId && viewerUserId === messageSenderId) {
+        wrap.classList.add('outgoing');
+    }
 
     const label = document.createElement('span');
     label.className = 'message-call-log-label';

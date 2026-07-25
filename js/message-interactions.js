@@ -23,6 +23,12 @@ let selectedMessageKeys = new Set();
 let onSelectionChange = null;
 let boundMessageContainer = null;
 
+const THREAD_MESSAGE_SELECTOR = '.message, .message-call-log';
+
+function isCallLogMessage(messageEl) {
+    return messageEl?.classList?.contains('message-call-log');
+}
+
 export function isSelectionMode() {
     return selectionMode;
 }
@@ -32,7 +38,6 @@ export function getSelectedMessageKeys() {
 }
 
 function messageSelectionKey(messageEl) {
-    if (messageEl.classList.contains('message-call-log')) return null;
     return messageEl.dataset.messageId || messageEl.dataset.clientId || null;
 }
 
@@ -67,7 +72,7 @@ function updateMessageCheckbox(messageEl) {
 export function refreshSelectionUi(messageContainer) {
     if (!messageContainer) return;
     messageContainer.classList.toggle('selection-mode', selectionMode);
-    messageContainer.querySelectorAll('.message').forEach(updateMessageCheckbox);
+    messageContainer.querySelectorAll(THREAD_MESSAGE_SELECTOR).forEach(updateMessageCheckbox);
 }
 
 export function enterSelectionMode({ messageContainer, initialMessageEl = null } = {}) {
@@ -94,7 +99,7 @@ export function selectAllMessages(messageContainer) {
     if (!selectionMode || !messageContainer) return 0;
 
     let added = 0;
-    messageContainer.querySelectorAll('.message').forEach((messageEl) => {
+    messageContainer.querySelectorAll(THREAD_MESSAGE_SELECTOR).forEach((messageEl) => {
         const key = messageSelectionKey(messageEl);
         if (!key) return;
         if (!selectedMessageKeys.has(key)) added += 1;
@@ -111,7 +116,7 @@ export function selectAllMessages(messageContainer) {
 function countSelectableMessages(messageContainer) {
     if (!messageContainer) return 0;
     let count = 0;
-    messageContainer.querySelectorAll('.message').forEach((messageEl) => {
+    messageContainer.querySelectorAll(THREAD_MESSAGE_SELECTOR).forEach((messageEl) => {
         if (messageSelectionKey(messageEl)) count += 1;
     });
     return count;
@@ -143,7 +148,7 @@ export function removeMessagesFromDom({ messageIds = [], clientIds = [] } = {}) 
     const idSet = new Set((messageIds || []).filter(Boolean));
     const clientSet = new Set((clientIds || []).filter(Boolean));
 
-    document.querySelectorAll('.message').forEach((el) => {
+    document.querySelectorAll(THREAD_MESSAGE_SELECTOR).forEach((el) => {
         const messageId = el.dataset.messageId;
         const clientId = el.dataset.clientId;
         if ((messageId && idSet.has(messageId)) || (clientId && clientSet.has(clientId))) {
@@ -154,7 +159,7 @@ export function removeMessagesFromDom({ messageIds = [], clientIds = [] } = {}) 
     });
 
     const container = document.getElementById('messageContainer');
-    if (container && !container.querySelector('.message')) {
+    if (container && !container.querySelector(THREAD_MESSAGE_SELECTOR)) {
         const placeholder = document.createElement('div');
         placeholder.dataset.emptyChat = 'true';
         placeholder.style.cssText = 'text-align:center; color:var(--text-muted); margin-top:50px; font-size:0.9rem;';
@@ -262,17 +267,17 @@ export function reactionsMapToList(emojiMap) {
 
 export function setMessageDbIdByClientId(clientId, messageId) {
     if (!clientId || !messageId) return;
-    const el = document.querySelector(`.message[data-client-id="${CSS.escape(clientId)}"]`);
+    const el = document.querySelector(`${THREAD_MESSAGE_SELECTOR}[data-client-id="${CSS.escape(clientId)}"]`);
     if (el) el.dataset.messageId = messageId;
 }
 
 export function findMessageElement({ messageId, clientId }) {
     if (messageId) {
-        const byId = document.querySelector(`.message[data-message-id="${CSS.escape(messageId)}"]`);
+        const byId = document.querySelector(`${THREAD_MESSAGE_SELECTOR}[data-message-id="${CSS.escape(messageId)}"]`);
         if (byId) return byId;
     }
     if (clientId) {
-        return document.querySelector(`.message[data-client-id="${CSS.escape(clientId)}"]`);
+        return document.querySelector(`${THREAD_MESSAGE_SELECTOR}[data-client-id="${CSS.escape(clientId)}"]`);
     }
     return null;
 }
@@ -431,7 +436,7 @@ function resolveMessageElForContextMenu(event) {
     const ignored = isContextMenuTargetIgnored(event.target);
     if (ignored) return null;
 
-    const direct = event.target?.closest?.('.message');
+    const direct = event.target?.closest?.(THREAD_MESSAGE_SELECTOR);
     if (direct && boundMessageContainer.contains(direct)) return direct;
 
     if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
@@ -439,7 +444,7 @@ function resolveMessageElForContextMenu(event) {
     const stack = document.elementsFromPoint(event.clientX, event.clientY);
     for (const el of stack) {
         if (!boundMessageContainer.contains(el)) continue;
-        const messageEl = el.closest?.('.message');
+        const messageEl = el.closest?.(THREAD_MESSAGE_SELECTOR);
         if (messageEl && boundMessageContainer.contains(messageEl)) return messageEl;
     }
 
@@ -502,6 +507,9 @@ async function copyMessageText(messageEl) {
 }
 
 function getMessageCopyText(messageEl) {
+    if (isCallLogMessage(messageEl)) {
+        return messageEl.querySelector('.message-call-log-label')?.textContent?.trim() || '';
+    }
     const bodyEl = messageEl.querySelector('.message-body');
     const body = bodyEl ? extractPlainTextWithFullUrls(bodyEl).trim() : '';
     if (body) return body;
@@ -739,38 +747,42 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
     contextMenuTarget = messageEl;
     menu.replaceChildren();
 
-    const reactions = document.createElement('div');
-    reactions.className = 'message-context-reactions';
-    reactions.setAttribute('role', 'group');
-    reactions.setAttribute('aria-label', 'Hızlı tepkiler');
+    const callLog = isCallLogMessage(messageEl);
 
-    for (const emoji of QUICK_EMOJIS) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'message-context-emoji';
-        btn.textContent = emoji;
-        btn.title = `${emoji} ile tepki ver`;
-        btn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            handleReactionPick(messageEl, emoji);
-            closeActiveActions();
-        });
-        reactions.appendChild(btn);
-    }
-    menu.appendChild(reactions);
-    appendContextDivider(menu);
+    if (!callLog) {
+        const reactions = document.createElement('div');
+        reactions.className = 'message-context-reactions';
+        reactions.setAttribute('role', 'group');
+        reactions.setAttribute('aria-label', 'Hızlı tepkiler');
 
-    menu.appendChild(createContextMenuItem({
-        icon: '↩',
-        label: 'Yanıtla',
-        onClick: () => {
-            if (!ctx?.isLoggedIn?.()) {
-                ctx?.promptLogin?.();
-                return;
-            }
-            startReplyToMessage(messageEl);
+        for (const emoji of QUICK_EMOJIS) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'message-context-emoji';
+            btn.textContent = emoji;
+            btn.title = `${emoji} ile tepki ver`;
+            btn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                handleReactionPick(messageEl, emoji);
+                closeActiveActions();
+            });
+            reactions.appendChild(btn);
         }
-    }));
+        menu.appendChild(reactions);
+        appendContextDivider(menu);
+
+        menu.appendChild(createContextMenuItem({
+            icon: '↩',
+            label: 'Yanıtla',
+            onClick: () => {
+                if (!ctx?.isLoggedIn?.()) {
+                    ctx?.promptLogin?.();
+                    return;
+                }
+                startReplyToMessage(messageEl);
+            }
+        }));
+    }
 
     menu.appendChild(createContextMenuItem({
         icon: '📋',
@@ -780,19 +792,21 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
         }
     }));
 
-    menu.appendChild(createContextMenuItem({
-        icon: '↪',
-        label: 'İlet',
-        onClick: () => {
-            if (!ctx?.isLoggedIn?.()) {
-                ctx?.promptLogin?.();
-                return;
+    if (!callLog) {
+        menu.appendChild(createContextMenuItem({
+            icon: '↪',
+            label: 'İlet',
+            onClick: () => {
+                if (!ctx?.isLoggedIn?.()) {
+                    ctx?.promptLogin?.();
+                    return;
+                }
+                onForwardMessage?.(extractMessagePayload(messageEl));
             }
-            onForwardMessage?.(extractMessagePayload(messageEl));
-        }
-    }));
+        }));
+    }
 
-    if (canEditMessage(messageEl)) {
+    if (!callLog && canEditMessage(messageEl)) {
         menu.appendChild(createContextMenuItem({
             icon: '✎',
             label: 'Düzenle',
@@ -808,26 +822,27 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
 
     appendContextDivider(menu);
 
-    menu.appendChild(createContextMenuItem({
-        icon: '🗑',
-        label: 'Benden sil',
-        danger: true,
-        onClick: () => {
-            if (!ctx?.isLoggedIn?.()) {
-                ctx?.promptLogin?.();
-                return;
-            }
-            onDeleteMessages?.([{
-                messageId: messageEl.dataset.messageId || null,
-                clientId: messageEl.dataset.clientId || null
-            }], 'me');
-        }
-    }));
-
-    if (messageEl.classList.contains('outgoing')) {
+    if (callLog) {
         menu.appendChild(createContextMenuItem({
             icon: '🗑',
-            label: 'Herkesten sil',
+            label: 'Sil',
+            danger: true,
+            onClick: () => {
+                if (!ctx?.isLoggedIn?.()) {
+                    ctx?.promptLogin?.();
+                    return;
+                }
+                onDeleteMessages?.([{
+                    messageId: messageEl.dataset.messageId || null,
+                    clientId: messageEl.dataset.clientId || null,
+                    isCallLog: true
+                }], 'everyone');
+            }
+        }));
+    } else {
+        menu.appendChild(createContextMenuItem({
+            icon: '🗑',
+            label: 'Benden sil',
             danger: true,
             onClick: () => {
                 if (!ctx?.isLoggedIn?.()) {
@@ -837,9 +852,27 @@ function showContextMenuForMessage(messageEl, clientX, clientY) {
                 onDeleteMessages?.([{
                     messageId: messageEl.dataset.messageId || null,
                     clientId: messageEl.dataset.clientId || null
-                }], 'everyone');
+                }], 'me');
             }
         }));
+
+        if (messageEl.classList.contains('outgoing')) {
+            menu.appendChild(createContextMenuItem({
+                icon: '🗑',
+                label: 'Herkesten sil',
+                danger: true,
+                onClick: () => {
+                    if (!ctx?.isLoggedIn?.()) {
+                        ctx?.promptLogin?.();
+                        return;
+                    }
+                    onDeleteMessages?.([{
+                        messageId: messageEl.dataset.messageId || null,
+                        clientId: messageEl.dataset.clientId || null
+                    }], 'everyone');
+                }
+            }));
+        }
     }
 
     appendContextDivider(menu);
@@ -1033,7 +1066,7 @@ export function initMessageInteractions({
         if (event.target.closest('.message-context-menu')) return;
 
         if (selectionMode) {
-            const messageEl = event.target.closest('.message');
+            const messageEl = event.target.closest(THREAD_MESSAGE_SELECTOR);
             if (messageEl && !event.target.closest('.message-select-checkbox')) {
                 event.stopPropagation();
                 const checkbox = messageEl.querySelector('.message-select-checkbox');
