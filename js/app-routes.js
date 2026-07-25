@@ -10,25 +10,27 @@ export function usernameToSlug(username) {
         .replace(/[^a-z0-9._-]+/g, '');
 }
 
-export function buildAppPath({ activePanel, currentActiveChat, username, profileUsername, memberProfileUsername } = {}) {
-    if (activePanel === 'profile-panel') {
-        const slug = usernameToSlug(profileUsername);
-        if (slug) return `/uye/${slug}`;
-        return '/profil';
-    }
-    if (activePanel === 'member-profile-panel') {
-        const slug = usernameToSlug(memberProfileUsername);
-        if (slug) return `/uye/${slug}/profil`;
-    }
+export function buildAppPath({ activePanel, currentActiveChat } = {}) {
+    if (activePanel === 'profile-panel') return '/profil';
     if (activePanel === 'bulut-panel') return '/bulut';
-    if (!currentActiveChat) return '/';
-
-    if (currentActiveChat.startsWith('User-') && username) {
-        const slug = usernameToSlug(username);
-        return slug ? `/uye/${slug}` : '/';
-    }
-
     return '/';
+}
+
+export function parseUserInviteQuery() {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('u') || params.get('uye');
+    if (!raw?.trim()) return null;
+    const slug = usernameToSlug(raw.trim()) || raw.trim().toLowerCase();
+    return slug ? { usernameSlug: slug } : null;
+}
+
+export function clearUserInviteQuery() {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('u') && !params.has('uye')) return;
+    params.delete('u');
+    params.delete('uye');
+    const qs = params.toString();
+    history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
 }
 
 export function parseAppPath(pathname) {
@@ -102,6 +104,9 @@ export function parseAppRoute() {
         }
     }
 
+    const invite = parseUserInviteQuery();
+    if (invite) return invite;
+
     return parseAppPath(window.location.pathname);
 }
 
@@ -119,6 +124,7 @@ export function shouldForcePwaHomeStart({ hasNotifyRoute = false } = {}) {
 
     if (route.view === 'chats-home') return false;
     if (route.view === 'profile-panel' || route.view === 'bulut-panel') return false;
+    if (route.view === 'member-profile' || route.usernameSlug || route.userId) return false;
 
     return true;
 }

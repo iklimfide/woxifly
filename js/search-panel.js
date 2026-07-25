@@ -57,7 +57,7 @@ function renderSearchHint() {
     const inChat = isInDmChat();
     results.innerHTML = `
         <p class="search-hint">En az 2 karakter yazın.</p>
-        <p class="search-hint search-hint--sub">Rumuz ile kişi arayabilirsiniz.${inChat ? ' Açık sohbette mesaj metni de aranır.' : ''}</p>
+        <p class="search-hint search-hint--sub">Rumuz ile kişi arayın.${inChat ? ' Açık sohbette mesaj metni de aranır.' : ' Adres çubuğu değişmeden sohbet açılır.'}</p>
     `;
 }
 

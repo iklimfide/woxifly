@@ -140,8 +140,9 @@ import {
     isStandalonePwa,
     usernameToSlug,
     replaceAppPath,
-    pushAppPath
+    clearUserInviteQuery
 } from './app-routes.js';
+import { initScrollChrome, resetScrollChrome } from './scroll-chrome.js';
 import {
     initHmCamouflage,
     syncHmProfileUi,
@@ -204,26 +205,13 @@ function saveAppRoute() {
     if (activePanel === 'bulut-panel' && !isCloudAdminUser()) {
         activePanel = 'chat-panel';
     }
-    const username = currentActiveChat?.startsWith('User-')
-        ? dmTitles.get(currentActiveChat.replace('User-', ''))
-        : null;
-    const profileUsername = activePanel === 'profile-panel' ? currentMyUsername : null;
-    const memberProfileUsername = activePanel === 'member-profile-panel'
-        ? viewingMemberProfileUsername
-        : null;
 
-    let path = buildAppPath({
+    const path = buildAppPath({
         activePanel,
-        currentActiveChat,
-        username,
-        profileUsername,
-        memberProfileUsername
+        currentActiveChat
     });
 
-    if (isStandalonePwa() && activePanel === 'chat-panel' && currentActiveChat?.startsWith('User-')) {
-        path = '/';
-    }
-
+    clearUserInviteQuery();
     replaceAppPath(path);
 }
 
@@ -624,13 +612,7 @@ async function openMemberProfile(userId, { push = false, fromChat = false } = {}
     showMainContentView();
     document.body.classList.add('member-profile-view');
     switchView('member-profile-panel', { skipRouteSave: true });
-
-    const slug = usernameToSlug(data.username);
-    if (slug) {
-        const path = `/uye/${slug}/profil`;
-        if (push) pushAppPath(path);
-        else replaceAppPath(path);
-    }
+    saveAppRoute();
 }
 
 async function returnFromMemberProfile() {
@@ -966,28 +948,24 @@ function getProfileShareUsername() {
     return currentMyUsername || sanitizeText(document.getElementById('usernameInput')?.value, 24);
 }
 
-function buildProfileShareUrl(username) {
-    const slug = usernameToSlug(username);
-    if (!slug) return null;
-    return `${window.location.origin}/uye/${slug}`;
+function buildProfileShareUrl() {
+    return `${window.location.origin}/`;
 }
 
 function updateProfileShareLink() {
     const linkEl = document.getElementById('profileShareLink');
     if (!linkEl) return;
 
-    const username = getProfileShareUsername();
-    const url = buildProfileShareUrl(username);
-
-    if (!url) {
+    if (!isLoggedIn()) {
         linkEl.textContent = '—';
         linkEl.disabled = true;
         linkEl.removeAttribute('title');
         return;
     }
 
+    const url = buildProfileShareUrl();
     linkEl.textContent = url;
-    linkEl.title = url;
+    linkEl.title = 'Woxifly ana linki — kişi bulmak için üstteki aramayı kullanın';
     linkEl.disabled = false;
 }
 
@@ -997,9 +975,9 @@ async function copyProfileShareUrl() {
         return;
     }
 
-    const url = buildProfileShareUrl(getProfileShareUsername());
+    const url = buildProfileShareUrl();
     if (!url) {
-        showToast('Profil linki oluşturulamadı. Önce geçerli bir rumuz kaydedin.', { type: 'warning' });
+        showToast('Profil linki oluşturulamadı.', { type: 'warning' });
         return;
     }
 
@@ -1017,13 +995,18 @@ async function shareProfile() {
         return;
     }
 
-    const url = buildProfileShareUrl(getProfileShareUsername());
+    const url = buildProfileShareUrl();
     if (!url) {
-        showNotify('Profil linki oluşturulamadı. Önce geçerli bir rumuz kaydedin.', { title: 'Paylaş', type: 'warning' });
+        showNotify('Profil linki oluşturulamadı.', { title: 'Paylaş', type: 'warning' });
         return;
     }
 
-    const shareData = { title: 'Woxifly', url };
+    const username = getProfileShareUsername();
+    const shareData = {
+        title: 'Woxifly',
+        text: username ? `@${formatDisplayUsername(username)} — Woxifly'de ara` : 'Woxifly',
+        url
+    };
 
     if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {
         try {
@@ -1179,10 +1162,30 @@ function updateMessageInputState() {
 }
 
 function isMobileLayout() {
-    return true;
+    return window.matchMedia('(max-width: 768px)').matches;
+}
+
+function syncDesktopLayout() {
+    document.body.classList.toggle('layout-desktop', !isMobileLayout());
+    const sidebar = document.getElementById('sidebar');
+    if (!isMobileLayout()) {
+        sidebar?.classList.add('open');
+        document.getElementById('sidebarOverlay')?.classList.remove('show');
+    }
+}
+
+function showChatPaneEmpty() {
+    const empty = document.getElementById('chatPaneEmpty');
+    if (empty) empty.hidden = false;
+}
+
+function hideChatPaneEmpty() {
+    const empty = document.getElementById('chatPaneEmpty');
+    if (empty) empty.hidden = true;
 }
 
 window.toggleSidebar = function () {
+    if (!isMobileLayout()) return;
     if (document.body.classList.contains('chats-home-view')) {
         return;
     }
@@ -1202,6 +1205,7 @@ window.toggleSidebar = function () {
 };
 
 window.closeSidebar = function () {
+    if (!isMobileLayout()) return;
     document.getElementById('sidebar')?.classList.remove('open');
     document.getElementById('sidebarOverlay')?.classList.remove('show');
     syncTopbarMenuIcon();
@@ -1210,7 +1214,12 @@ window.closeSidebar = function () {
 function showMainContentView() {
     document.body.classList.remove('chats-home-view');
     document.body.classList.add('chat-open-view');
-    closeSidebar();
+    hideChatPaneEmpty();
+    if (isMobileLayout()) {
+        closeSidebar();
+    } else {
+        document.getElementById('sidebar')?.classList.add('open');
+    }
 }
 
 window.switchView = function (panelId, { skipRouteSave = false } = {}) {
@@ -1288,6 +1297,7 @@ function showChatConversationUi() {
 
 async function showChatListHome() {
     await endVoiceCall();
+    resetScrollChrome();
     currentActiveChat = null;
     currentConversationId = null;
     leaveRealtimeRoom();
@@ -1313,8 +1323,15 @@ async function showChatListHome() {
     if (container) container.hidden = true;
     if (input) input.hidden = true;
 
+    if (isMobileLayout()) {
+        hideChatPaneEmpty();
+        closeSidebar();
+    } else {
+        showChatPaneEmpty();
+        document.getElementById('sidebar')?.classList.add('open');
+    }
+
     switchView('chat-panel');
-    closeSidebar();
     syncTopbarMenuIcon();
     updateMessageInputState();
     saveAppRoute();
@@ -3304,6 +3321,7 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
     document.body.classList.remove('member-profile-view');
 
     showChatConversationUi();
+    resetScrollChrome();
     messageHistoryLoadId += 1;
     clearMessageContainer();
     currentActiveChat = chatId;
@@ -4241,6 +4259,17 @@ async function initDashboard() {
     }
     runInitStep('initMediaComposer', initMediaComposer);
     runInitStep('initMessageHistoryScroll', initMessageHistoryScroll);
+    runInitStep('initScrollChrome', initScrollChrome);
+    syncDesktopLayout();
+    window.matchMedia('(max-width: 768px)').addEventListener('change', () => {
+        syncDesktopLayout();
+        if (!isMobileLayout() && document.body.classList.contains('chats-home-view')) {
+            showChatPaneEmpty();
+        }
+        if (isMobileLayout() && document.body.classList.contains('chats-home-view')) {
+            hideChatPaneEmpty();
+        }
+    });
     runInitStep('initMessageRetentionSweep', initMessageRetentionSweep);
     runInitStep('initDmRealtimeReconnect', () => {
         document.addEventListener('visibilitychange', () => {
@@ -4354,6 +4383,10 @@ async function initDashboard() {
             const route = parseAppRoute();
             if (route) {
                 await restoreAppRoute(route);
+                clearUserInviteQuery();
+                if (/^\/uye\//i.test(window.location.pathname)) {
+                    replaceAppPath('/');
+                }
                 saveAppRoute();
             } else {
                 await openDefaultStartupChat();
@@ -4379,6 +4412,7 @@ async function initDashboard() {
         const nextRoute = parseAppRoute();
         if (nextRoute) {
             await restoreAppRoute(nextRoute);
+            saveAppRoute();
         } else {
             await showChatListHome();
         }
