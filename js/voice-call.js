@@ -21,14 +21,33 @@ let localStream = null;
 let remoteAudioEl = null;
 let ringTimer = null;
 let muted = false;
+let connectedAt = null;
+let callLogRecorded = false;
 
 function el(id) {
     return document.getElementById(id);
 }
 
 function setPhase(next) {
+    if (next === 'connected' && phase !== 'connected') {
+        connectedAt = Date.now();
+    }
     phase = next;
     syncCallUi();
+}
+
+function postCallLog(outcome, { durationSec = 0, actor = null } = {}) {
+    if (callLogRecorded || !conversationId || !deps?.recordCallLog) return;
+    const initiatorId = isCaller ? deps.getUserId() : partnerUserId;
+    if (!initiatorId) return;
+    callLogRecorded = true;
+    void deps.recordCallLog({
+        conversationId,
+        outcome,
+        initiatorId,
+        durationSec,
+        actor
+    });
 }
 
 function clearRingTimer() {
@@ -165,34 +184,57 @@ function syncCallUi() {
     const nameEl = el('voiceCallPartnerName');
     const callBtn = el('topbarCallBtn');
     const muteBtn = el('voiceCallMuteBtn');
+    const inCallBar = el('voiceCallInCallBar');
+    const inBarName = el('voiceCallInBarName');
+    const inBarStatus = el('voiceCallInBarStatus');
+    const inBarMute = el('voiceCallInBarMuteBtn');
+    const inBarEnd = el('voiceCallInBarEndBtn');
 
     const busy = phase !== 'idle';
-    if (overlay) overlay.hidden = !busy;
-    if (incoming) incoming.hidden = phase !== 'incoming';
-    if (active) active.hidden = phase !== 'calling' && phase !== 'ringing' && phase !== 'connected';
+    const inCall = phase === 'connected';
+    const showOverlay = busy && !inCall;
+    const partner = partnerLabel(partnerDisplayName);
+    const statusText = inCall
+        ? (muted ? 'Sessiz · görüşmede' : 'Görüşmede')
+        : '';
 
-    if (nameEl) nameEl.textContent = partnerLabel(partnerDisplayName);
+    if (overlay) overlay.hidden = !showOverlay;
+    if (incoming) incoming.hidden = phase !== 'incoming';
+    if (active) active.hidden = phase === 'idle' || phase === 'incoming';
+
+    if (inCallBar) inCallBar.hidden = !inCall;
+    if (inBarName) inBarName.textContent = partner;
+    if (inBarStatus) inBarStatus.textContent = statusText;
+    if (inBarMute) {
+        inBarMute.hidden = !inCall;
+        inBarMute.textContent = muted ? 'Sesi aç' : 'Sessiz';
+    }
+    if (inBarEnd) inBarEnd.hidden = !inCall;
+
+    if (nameEl) nameEl.textContent = partner;
 
     if (status) {
         if (phase === 'calling') status.textContent = 'Aranıyor…';
         else if (phase === 'ringing') status.textContent = 'Bağlanıyor…';
-        else if (phase === 'connected') status.textContent = muted ? 'Sessiz · görüşmede' : 'Görüşmede';
+        else if (phase === 'connected') status.textContent = statusText;
         else if (phase === 'incoming') status.textContent = 'Gelen sesli arama';
         else status.textContent = '';
     }
 
     if (callBtn) {
-        callBtn.classList.toggle('app-topbar__icon-btn--active', phase === 'connected' || phase === 'calling');
-        callBtn.disabled = busy && phase !== 'connected' && phase !== 'calling';
-        callBtn.setAttribute('aria-label', phase === 'connected' ? 'Aramayı kapat' : 'Sesli ara');
+        callBtn.classList.toggle('app-topbar__icon-btn--active', inCall || phase === 'calling');
+        callBtn.disabled = busy && !inCall && phase !== 'calling';
+        callBtn.setAttribute('aria-label', inCall ? 'Aramayı kapat' : 'Sesli ara');
+        if (inCall) callBtn.hidden = false;
     }
 
     if (muteBtn) {
-        muteBtn.hidden = phase !== 'connected';
+        muteBtn.hidden = phase !== 'connected' && phase !== 'ringing';
         muteBtn.textContent = muted ? 'Sesi aç' : 'Sessiz';
     }
 
-    document.body.classList.toggle('voice-call-active', busy);
+    document.body.classList.toggle('voice-call-active', showOverlay);
+    document.body.classList.toggle('voice-call-connected', inCall);
 }
 
 export function isVoiceCallSupported() {
@@ -228,6 +270,13 @@ async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
     clearRingTimer();
     pendingOffer = null;
 
+    const endPhase = phase;
+    const endIsCaller = isCaller;
+    const endConnectedAt = connectedAt;
+    const endConversationId = conversationId;
+    const endPartnerUserId = partnerUserId;
+    const endUserId = deps?.getUserId?.();
+
     if (notifyRemote && callId && conversationId && phase !== 'idle') {
         await sendSignal({ type: reason }).catch(() => {});
     }
@@ -252,7 +301,30 @@ async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
     callId = null;
     isCaller = false;
     muted = false;
+    connectedAt = null;
     setPhase('idle');
+
+    if (!callLogRecorded && endConversationId && deps?.recordCallLog) {
+        if (endConnectedAt && endUserId) {
+            const durationSec = Math.max(1, Math.round((Date.now() - endConnectedAt) / 1000));
+            callLogRecorded = true;
+            void deps.recordCallLog({
+                conversationId: endConversationId,
+                outcome: 'completed',
+                initiatorId: endIsCaller ? endUserId : endPartnerUserId,
+                durationSec
+            });
+        } else if (endIsCaller && endPhase === 'calling' && notifyRemote && endUserId) {
+            callLogRecorded = true;
+            void deps.recordCallLog({
+                conversationId: endConversationId,
+                outcome: 'cancelled',
+                initiatorId: endUserId
+            });
+        }
+    }
+
+    callLogRecorded = false;
 }
 
 function rejectIncoming() {
@@ -260,6 +332,12 @@ function rejectIncoming() {
         void teardownCall({ notifyRemote: false });
         return;
     }
+    postCallLog('declined', { actor: 'callee' });
+    const overlay = el('voiceCallOverlay');
+    const incoming = el('voiceCallIncoming');
+    if (incoming) incoming.hidden = true;
+    if (overlay) overlay.hidden = true;
+    document.body.classList.remove('voice-call-active');
     void sendSignal({ type: 'decline' }).finally(() => {
         void teardownCall({ notifyRemote: false });
     });
@@ -288,8 +366,19 @@ async function acceptIncoming() {
     }
 }
 
+async function recordDeclinedCallLog(conversationId, callerUserId) {
+    if (!conversationId || !callerUserId || !deps?.recordCallLog) return;
+    await deps.recordCallLog({
+        conversationId,
+        outcome: 'declined',
+        initiatorId: callerUserId,
+        actor: 'callee'
+    });
+}
+
 async function handleInvite(payload) {
     if (phase !== 'idle') {
+        void recordDeclinedCallLog(payload.conversation_id, payload.from_user_id);
         void broadcastCallSignal({
             call_id: payload.call_id,
             conversation_id: payload.conversation_id,
@@ -300,6 +389,7 @@ async function handleInvite(payload) {
     }
 
     if (deps?.isPartnerBlocked?.(payload.from_user_id)) {
+        void recordDeclinedCallLog(payload.conversation_id, payload.from_user_id);
         void broadcastCallSignal({
             call_id: payload.call_id,
             conversation_id: payload.conversation_id,
@@ -373,14 +463,14 @@ export async function handleVoiceCallSignal(payload) {
             break;
         case 'decline':
             if (payload.call_id !== callId) return;
-            if (isCaller) deps?.showToast?.('Arama reddedildi.', { type: 'info' });
+            await teardownCall({ notifyRemote: false });
+            break;
+        case 'no_answer':
+            if (payload.call_id !== callId) return;
             await teardownCall({ notifyRemote: false });
             break;
         case 'hangup':
             if (payload.call_id !== callId) return;
-            if (phase === 'connected' || phase === 'incoming' || phase === 'calling') {
-                deps?.showToast?.('Görüşme sonlandı.', { type: 'info' });
-            }
             await teardownCall({ notifyRemote: false });
             break;
         default:
@@ -418,6 +508,8 @@ export async function startVoiceCall() {
     partnerUserId = partnerId;
     callId = crypto.randomUUID();
     isCaller = true;
+    callLogRecorded = false;
+    connectedAt = null;
 
     try {
         setPhase('calling');
@@ -439,10 +531,12 @@ export async function startVoiceCall() {
         }
 
         ringTimer = window.setTimeout(() => {
-            if (phase === 'calling') {
-                deps?.showToast?.('Cevap yok.', { type: 'info' });
-                void teardownCall({ notifyRemote: true, reason: 'hangup' });
-            }
+            if (phase !== 'calling') return;
+            void (async () => {
+                postCallLog('no_answer');
+                await sendSignal({ type: 'no_answer' }).catch(() => {});
+                await teardownCall({ notifyRemote: false });
+            })();
         }, 45000);
     } catch (err) {
         deps?.showToast?.(err instanceof Error ? err.message : 'Arama başlatılamadı.', { type: 'error' });
@@ -471,6 +565,8 @@ export function initVoiceCall(options) {
     el('voiceCallDeclineBtn')?.addEventListener('click', () => rejectIncoming());
     el('voiceCallEndBtn')?.addEventListener('click', () => void endVoiceCall());
     el('voiceCallMuteBtn')?.addEventListener('click', () => toggleMute());
+    el('voiceCallInBarEndBtn')?.addEventListener('click', () => void endVoiceCall());
+    el('voiceCallInBarMuteBtn')?.addEventListener('click', () => toggleMute());
 
     el('topbarCallBtn')?.addEventListener('click', () => {
         if (phase === 'connected') {

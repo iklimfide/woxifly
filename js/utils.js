@@ -82,9 +82,9 @@ export function createMessageDateSeparator(dateString) {
 
 export function appendMessageToContainer(container, messageEl, createdAt) {
     const dayKey = getCalendarDayKey(createdAt);
-    const lastMessage = container.querySelector('.message:last-of-type');
+    const lastThreadItem = container.querySelector('.message:last-of-type, .message-call-log:last-of-type');
 
-    if (dayKey && (!lastMessage || lastMessage.dataset.dayKey !== dayKey)) {
+    if (dayKey && (!lastThreadItem || lastThreadItem.dataset.dayKey !== dayKey)) {
         container.appendChild(createMessageDateSeparator(createdAt));
     }
 

@@ -32,6 +32,7 @@ export function getSelectedMessageKeys() {
 }
 
 function messageSelectionKey(messageEl) {
+    if (messageEl.classList.contains('message-call-log')) return null;
     return messageEl.dataset.messageId || messageEl.dataset.clientId || null;
 }
 

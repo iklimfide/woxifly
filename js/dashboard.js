@@ -42,6 +42,12 @@ import {
 } from './realtime-chat.js';
 import { sanitizeText, isValidUsername, formatDisplayUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles, initPinVisibilityToggles, appendMessageToContainer, createMessageDateSeparator, getCalendarDayKey } from './utils.js';
 import {
+    parseCallLogBody,
+    encodeCallLogBody,
+    formatCallLogText,
+    createCallLogMessageElement
+} from './call-log-message.js';
+import {
     startVoiceRecording,
     stopVoiceRecording,
     cancelVoiceRecording,
@@ -1423,6 +1429,31 @@ function messageClickHandler() {
     return (senderId, username) => openChatFromSender(senderId, username);
 }
 
+function appendCallLogMessageToUI({
+    body,
+    time,
+    createdAt = null,
+    clientId = null,
+    messageId = null,
+    messageSenderId = null
+}) {
+    const container = document.getElementById('messageContainer');
+    clearMessagePlaceholders(container);
+
+    const messageEl = createCallLogMessageElement({
+        body,
+        time,
+        createdAt,
+        clientId,
+        messageId,
+        viewerUserId: currentUserId,
+        messageSenderId: messageSenderId || currentUserId
+    });
+
+    appendMessageToContainer(container, messageEl, createdAt || new Date().toISOString());
+    container.scrollTop = container.scrollHeight;
+}
+
 function appendMessageToUI({
     sender,
     body,
@@ -1652,7 +1683,7 @@ function clearMessagePlaceholders(container = document.getElementById('messageCo
 
 function clearMessageContainer(container = document.getElementById('messageContainer')) {
     if (!container) return;
-    container.querySelectorAll('.message, .message-date-separator').forEach((el) => el.remove());
+    container.querySelectorAll('.message, .message-call-log, .message-date-separator').forEach((el) => el.remove());
     clearMessagePlaceholders(container);
 }
 
@@ -1704,6 +1735,23 @@ function showEmptyChat() {
 function handleIncomingBroadcast(payload) {
     if (payload.sender_id && payload.sender_id === currentUserId) return;
     if (payload.sender_id && isUserBlocked(payload.sender_id)) return;
+
+    if (parseCallLogBody(payload.body || '')) {
+        appendCallLogMessageToUI({
+            body: payload.body || '',
+            time: formatTime(payload.created_at),
+            createdAt: payload.created_at,
+            clientId: payload.client_id || null,
+            messageSenderId: payload.sender_id || null
+        });
+
+        const partnerUserId = getUserIdForConversation(currentConversationId) || payload.sender_id;
+        const chatId = partnerUserId ? `User-${partnerUserId}` : null;
+        if (chatId) {
+            syncDmSidebarPreview(chatId, payload, false);
+        }
+        return;
+    }
 
     const contentType = payload.content_type || 'text';
     const mediaUrl = resolveMessageMediaUrl(payload.media_url, payload.r2_key);
@@ -1826,6 +1874,14 @@ function notifyIncomingDmMessage(payload, conversationId) {
 
     const partnerUserId = getUserIdForConversation(conversationId) || payload.sender_id;
     const chatId = partnerUserId ? `User-${partnerUserId}` : currentActiveChat;
+
+    if (parseCallLogBody(payload.body || '')) {
+        if (chatId?.startsWith('User-')) {
+            syncDmSidebarPreview(chatId, payload, false);
+        }
+        return;
+    }
+
     if (!chatId?.startsWith('User-')) return;
 
     const chatPanelActive = document.getElementById('chat-panel')?.classList.contains('active');
@@ -1951,6 +2007,22 @@ function isActiveMessageHistoryLoad(loadId, conversationId) {
 }
 
 function createMessageHistoryElement(msg, { profileMap = {}, reactionsByMessage = new Map() } = {}) {
+    if (parseCallLogBody(msg.body || '')) {
+        const messageEl = createCallLogMessageElement({
+            body: msg.body || '',
+            time: formatTime(msg.created_at),
+            createdAt: msg.created_at,
+            clientId: msg.client_id || null,
+            messageId: msg.id,
+            viewerUserId: currentUserId,
+            messageSenderId: msg.sender_id || null
+        });
+        const dayKey = getCalendarDayKey(msg.created_at);
+        if (dayKey) messageEl.dataset.dayKey = dayKey;
+        if (msg.created_at) messageEl.dataset.createdAt = msg.created_at;
+        return messageEl;
+    }
+
     const senderName = msg.sender_username || profileMap[msg.sender_id] || 'Kullanıcı';
     const isOutgoing = msg.sender_id === currentUserId;
     const messageEl = createMessageElement({
@@ -1988,7 +2060,7 @@ function cleanupOrphanDateSeparators(container) {
 
     container.querySelectorAll('.message-date-separator').forEach((separator) => {
         let next = separator.nextElementSibling;
-        while (next && !next.classList.contains('message')) {
+        while (next && !next.classList.contains('message') && !next.classList.contains('message-call-log')) {
             next = next.nextElementSibling;
         }
         if (!next) separator.remove();
@@ -2000,7 +2072,7 @@ function purgeExpiredMessagesFromDom() {
     if (!container) return false;
 
     let removed = false;
-    container.querySelectorAll('.message').forEach((messageEl) => {
+    container.querySelectorAll('.message, .message-call-log').forEach((messageEl) => {
         const createdAt = messageEl.dataset.createdAt;
         if (!createdAt || isWithinMessageRetention(createdAt)) return;
         messageEl.remove();
@@ -2011,7 +2083,7 @@ function purgeExpiredMessagesFromDom() {
 
     cleanupOrphanDateSeparators(container);
 
-    if (!container.querySelector('.message')) {
+    if (!container.querySelector('.message, .message-call-log')) {
         showEmptyChat();
     }
 
@@ -2038,7 +2110,7 @@ function initMessageRetentionSweep() {
 function fixPrependedDateSeparatorBoundary(container, prependedCount, lastPrependedDayKey) {
     if (!prependedCount || !lastPrependedDayKey) return;
 
-    const allMessages = container.querySelectorAll('.message');
+    const allMessages = container.querySelectorAll('.message, .message-call-log');
     const boundaryMsg = allMessages[prependedCount];
     if (!boundaryMsg || boundaryMsg.dataset.dayKey !== lastPrependedDayKey) return;
 
@@ -2319,7 +2391,7 @@ async function loadMessageHistory(conversationId) {
 
         if (!isActiveMessageHistoryLoad(loadId, conversationId)) return;
 
-        container.querySelectorAll('.message, .message-date-separator').forEach((el) => el.remove());
+        container.querySelectorAll('.message, .message-call-log, .message-date-separator').forEach((el) => el.remove());
         renderMessageHistoryRows(container, mergedOrdered, {
             profileMap: batch.profileMap,
             reactionsByMessage
@@ -2686,6 +2758,55 @@ async function persistMessageAsync({
     } catch (err) {
         console.error('Mesaj kaydı başarısız:', err);
     }
+}
+
+async function dispatchCallLogMessage({
+    conversationId,
+    outcome,
+    initiatorId,
+    durationSec = 0,
+    actor = null
+}) {
+    if (!conversationId || !initiatorId || !currentUserId) return;
+
+    const body = encodeCallLogBody({ outcome, initiatorId, durationSec, actor });
+    const messageClientId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const payload = {
+        client_id: messageClientId,
+        body,
+        content_type: 'text',
+        media_url: null,
+        r2_key: null,
+        sender_id: currentUserId,
+        sender_name: currentMyUsername,
+        created_at: createdAt,
+        conversation_id: conversationId,
+        quote: null
+    };
+
+    if (conversationId === currentConversationId) {
+        appendCallLogMessageToUI({
+            body,
+            time: formatTime(createdAt),
+            createdAt,
+            clientId: messageClientId,
+            messageSenderId: currentUserId
+        });
+    }
+
+    broadcastShout(payload).catch((err) => console.error('Broadcast başarısız:', err));
+
+    const partnerUserId = getUserIdForConversation(conversationId);
+    if (partnerUserId) {
+        syncDmSidebarPreview(`User-${partnerUserId}`, payload, true);
+    }
+
+    await persistMessageAsync({
+        body,
+        contentType: 'text',
+        clientId: messageClientId
+    });
 }
 
 async function dispatchOutgoingMessage({
@@ -3407,6 +3528,17 @@ async function openDefaultStartupChat() {
 
 function previewFromMessage({ body = '', contentType = 'text', isOutgoing = false }) {
     const prefix = isOutgoing ? 'Sen: ' : '';
+    const callMeta = parseCallLogBody(body);
+    if (callMeta) {
+        if (callMeta.outcome === 'declined') {
+            const label = isOutgoing ? 'Reddettiniz' : 'Reddedildi';
+            return `${prefix}📞\u00a0${label}`;
+        }
+        const label = formatCallLogText(callMeta, currentUserId, {
+            messageSenderId: isOutgoing ? currentUserId : null
+        });
+        return label ? `${prefix}📞\u00a0${label}` : `${prefix}📞 Sesli arama`;
+    }
 
     if (contentType === 'image') return `${prefix}📷 Fotoğraf`;
     if (contentType === 'video') return `${prefix}🎬 Video`;
@@ -4111,7 +4243,8 @@ async function initDashboard() {
             getMyUsername: () => currentMyUsername,
             isPartnerBlocked: (userId) => isUserBlocked(userId),
             openConversationForCall,
-            showToast
+            showToast,
+            recordCallLog: (args) => dispatchCallLogMessage(args)
         });
     });
     document.getElementById('appHomeLink')?.addEventListener('click', (event) => {
