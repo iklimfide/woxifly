@@ -33,21 +33,13 @@ function setStatus(text, isError = false) {
 
 async function cloudFetch(action, params = {}) {
     const session = await deps.getSession();
-    if (!session?.access_token) {
-        throw new Error('Oturum gerekli.');
-    }
-
     const query = new URLSearchParams({ action, ...params });
     const url = `/api/cloud?${query.toString()}`;
-    const authHeader = { Authorization: `Bearer ${session.access_token}` };
 
-    let res = await fetch(url, {
+    let res = await deps.fetchWithAuth(url, {
         method: 'POST',
         cache: 'no-store',
-        headers: {
-            ...authHeader,
-            'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: '{}'
     });
 
@@ -56,10 +48,9 @@ async function cloudFetch(action, params = {}) {
         const probe = await res.clone().json().catch(() => ({}));
         const hint = String(probe.error || '').toLowerCase();
         if (hint.includes('get')) {
-            res = await fetch(url, {
+            res = await deps.fetchWithAuth(url, {
                 method: 'GET',
-                cache: 'no-store',
-                headers: authHeader
+                cache: 'no-store'
             });
         }
     }
@@ -82,7 +73,7 @@ async function cloudFetch(action, params = {}) {
         if (data.allowed !== true) {
             throw new Error('Bulut YP erişimi yok.');
         }
-        if (data.userId !== session.user?.id) {
+        if (session?.user?.id && data.userId !== session.user.id) {
             throw new Error('Bulut YP erişimi doğrulanamadı.');
         }
     }

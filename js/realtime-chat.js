@@ -8,10 +8,31 @@ const notificationChannelByConversation = new Map();
 
 function dispatchCallSignal(payload) {
     if (!payload?.call_id || !payload?.type) return;
+    if (shouldDedupeCallSignal(payload)) return;
     onCallSignal?.(payload);
 }
 
 let onCallSignal = null;
+/** Açık sohbet — bildirim kanalındaki mesaj yinelemesini önlemek için (arama sinyali her zaman dinlenir). */
+let dmNotificationActiveConversationId = null;
+
+const recentCallSignalKeys = new Map();
+const CALL_SIGNAL_DEDUPE_MS = 4000;
+
+export function shouldDedupeCallSignal(payload) {
+    if (!payload?.call_id || !payload?.type) return false;
+    const key = `${payload.call_id}:${payload.type}:${payload.from_user_id || ''}`;
+    const now = Date.now();
+    const prev = recentCallSignalKeys.get(key);
+    if (prev != null && now - prev < CALL_SIGNAL_DEDUPE_MS) return true;
+    recentCallSignalKeys.set(key, now);
+    if (recentCallSignalKeys.size > 80) {
+        for (const [k, t] of recentCallSignalKeys) {
+            if (now - t > CALL_SIGNAL_DEDUPE_MS) recentCallSignalKeys.delete(k);
+        }
+    }
+    return false;
+}
 
 export function setVoiceCallSignalHandler(handler) {
     onCallSignal = typeof handler === 'function' ? handler : null;
@@ -54,10 +75,11 @@ export function syncDmNotificationRooms(supabase, conversationIds, {
     onReaction
 } = {}) {
     supabaseClient = supabase;
+    dmNotificationActiveConversationId = activeConversationId || null;
     const targetIds = new Set((conversationIds || []).filter(Boolean));
 
     for (const [convId, channel] of notificationChannels) {
-        if (!targetIds.has(convId) || convId === activeConversationId) {
+        if (!targetIds.has(convId)) {
             supabase.removeChannel(channel);
             notificationChannels.delete(convId);
             notificationChannelByConversation.delete(convId);
@@ -65,7 +87,7 @@ export function syncDmNotificationRooms(supabase, conversationIds, {
     }
 
     for (const convId of targetIds) {
-        if (convId === activeConversationId || notificationChannels.has(convId)) continue;
+        if (notificationChannels.has(convId)) continue;
 
         const roomKey = `dm:${convId}`;
         const channel = supabase.channel(roomKey, {
@@ -73,12 +95,14 @@ export function syncDmNotificationRooms(supabase, conversationIds, {
         });
 
         channel.on('broadcast', { event: 'shout' }, ({ payload }) => {
+            if (convId === dmNotificationActiveConversationId) return;
             if (!payload?.client_id) return;
             if (seenClientIds.has(payload.client_id)) return;
             if (notificationSeenClientIds.has(payload.client_id)) return;
             notificationSeenClientIds.add(payload.client_id);
             onMessage?.(payload, convId);
         }).on('broadcast', { event: 'reaction' }, ({ payload }) => {
+            if (convId === dmNotificationActiveConversationId) return;
             onReaction?.(payload, convId);
         }).on('broadcast', { event: 'call' }, ({ payload }) => {
             dispatchCallSignal(payload);
@@ -245,18 +269,25 @@ async function sendCallOnChannel(channel, payload) {
 export async function broadcastCallSignal(payload) {
     if (!payload?.conversation_id) return false;
 
-    if (activeChannel && activeRoomKey === `dm:${payload.conversation_id}`) {
-        return sendCallOnChannel(activeChannel, payload);
+    const roomKey = `dm:${payload.conversation_id}`;
+    let sent = false;
+
+    if (activeChannel && activeRoomKey === roomKey) {
+        sent = await sendCallOnChannel(activeChannel, payload) || sent;
     }
 
     const notifyChannel = notificationChannelByConversation.get(payload.conversation_id);
-    if (notifyChannel) {
-        return sendCallOnChannel(notifyChannel, payload);
+    if (notifyChannel && notifyChannel !== activeChannel) {
+        sent = await sendCallOnChannel(notifyChannel, payload) || sent;
     }
 
-    if (activeChannel) {
-        return sendCallOnChannel(activeChannel, payload);
+    if (!sent && notifyChannel) {
+        sent = await sendCallOnChannel(notifyChannel, payload);
     }
 
-    return false;
+    if (!sent && activeChannel) {
+        sent = await sendCallOnChannel(activeChannel, payload);
+    }
+
+    return sent;
 }

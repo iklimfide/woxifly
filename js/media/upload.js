@@ -1,15 +1,10 @@
-import { getSession } from '../supabase-client.js';
+import { fetchWithAuth } from '../supabase-client.js';
 import { isValidMediaUrl, toMediaUrl } from './urls.js';
 
 const UPLOAD_URL = '/api/upload';
 const TIMEOUT_MS = 120_000;
 
 export async function uploadFile(file, kind) {
-    const session = await getSession();
-    if (!session?.access_token) {
-        throw new Error('Oturum gerekli');
-    }
-
     const formData = new FormData();
     formData.append('kind', kind);
     formData.append('file', file, file.name || `upload.${kind}`);
@@ -19,9 +14,8 @@ export async function uploadFile(file, kind) {
 
     let response;
     try {
-        response = await fetch(`${UPLOAD_URL}?kind=${encodeURIComponent(kind)}`, {
+        response = await fetchWithAuth(`${UPLOAD_URL}?kind=${encodeURIComponent(kind)}`, {
             method: 'POST',
-            headers: { Authorization: `Bearer ${session.access_token}` },
             body: formData,
             signal: controller.signal
         });

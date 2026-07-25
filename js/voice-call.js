@@ -1,4 +1,4 @@
-import { getSession } from './supabase-client.js';
+import { fetchWithAuth } from './supabase-client.js';
 import { broadcastCallSignal } from './realtime-chat.js';
 import { formatDisplayUsername } from './utils.js';
 
@@ -70,14 +70,13 @@ function parseJsonResponse(text) {
 }
 
 async function fetchIceServers() {
-    const session = await getSession();
-    if (!session?.access_token) {
+    let res;
+    try {
+        res = await fetchWithAuth('/api/turn-credentials');
+    } catch {
         throw new Error('Oturum gerekli.');
     }
 
-    const res = await fetch('/api/turn-credentials', {
-        headers: { Authorization: `Bearer ${session.access_token}` }
-    });
     const text = await res.text();
     const data = parseJsonResponse(text);
 
@@ -93,13 +92,21 @@ async function fetchIceServers() {
     }
 
     if (!res.ok) {
+        if (res.status === 401) {
+            deps?.showToast?.(
+                'Oturum sunucuda doğrulanamadı; arama STUN ile deneniyor. Sorun sürerse çıkış yapıp tekrar girin veya Vercel SUPABASE anahtarlarını kontrol edin.',
+                { type: 'warning' }
+            );
+            return DEFAULT_ICE_SERVERS;
+        }
         if (res.status >= 500) {
             deps?.showToast?.(data.error || 'TURN geçici olarak kullanılamıyor; STUN deneniyor.', {
                 type: 'warning'
             });
             return data.iceServers?.length ? data.iceServers : DEFAULT_ICE_SERVERS;
         }
-        throw new Error(data.error || 'TURN bilgisi alınamadı.');
+        deps?.showToast?.(data.error || 'TURN alınamadı; STUN kullanılıyor.', { type: 'warning' });
+        return DEFAULT_ICE_SERVERS;
     }
 
     return data.iceServers?.length ? data.iceServers : DEFAULT_ICE_SERVERS;

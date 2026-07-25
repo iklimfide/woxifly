@@ -1,4 +1,4 @@
-import { supabase, getSession } from './supabase-client.js';
+import { supabase, getSession, fetchWithAuth, initSessionKeepAlive, getAccessTokenForApi } from './supabase-client.js';
 import { initAuthModal, openAuthModal } from './auth-modal.js';
 import { initWelcomeModal, maybeShowWelcomeModal, closeWelcomeModal } from './welcome-modal.js';
 import { initNotifyModal, showNotify, showToast, showConfirmToast, closeNotifyModal } from './notify-modal.js';
@@ -1104,16 +1104,12 @@ async function uploadProfileAvatar(file) {
 
     const compressed = await compressImageForAvatar(file);
 
-    const session = await getSession();
-    if (!session?.access_token) throw new Error('Oturum bulunamadı.');
-
     const form = new FormData();
     form.append('file', compressed, compressed.name || 'avatar.jpg');
     form.append('kind', 'avatar');
 
-    const res = await fetch('/api/upload?kind=avatar', {
+    const res = await fetchWithAuth('/api/upload?kind=avatar', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}` },
         body: form
     });
 
@@ -1143,12 +1139,8 @@ async function removeProfileAvatar() {
 
     if (!currentMyAvatarUrl) return;
 
-    const session = await getSession();
-    if (!session?.access_token) throw new Error('Oturum bulunamadı.');
-
-    const res = await fetch('/api/avatar-remove', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}` }
+    const res = await fetchWithAuth('/api/avatar-remove', {
+        method: 'POST'
     });
 
     const data = await res.json();
@@ -1795,6 +1787,15 @@ function refreshDmNotificationListeners() {
         onMessage: handleIncomingDmNotification,
         onReaction: handleIncomingReactionNotification
     });
+}
+
+function reconnectDmRealtime() {
+    if (!isLoggedIn()) return;
+    void getAccessTokenForApi({ forceRefresh: true }).catch(() => {});
+    refreshDmNotificationListeners();
+    if (currentConversationId) {
+        subscribeDmRealtime(currentConversationId);
+    }
 }
 
 async function isReactionOnMyMessage(payload) {
@@ -4183,10 +4184,12 @@ async function initDashboard() {
         initPinVisibilityToggles();
     });
     runInitStep('initHmCamouflage', initHmCamouflage);
+    runInitStep('initSessionKeepAlive', initSessionKeepAlive);
     runInitStep('initLinkViewer', initLinkViewer);
     runInitStep('initViewer', initViewer);
     runInitStep('initCloudPanel', () => initCloudPanel({
         getSession,
+        fetchWithAuth,
         isLoggedIn,
         switchView,
         promptLogin,
@@ -4210,6 +4213,16 @@ async function initDashboard() {
     runInitStep('initMediaComposer', initMediaComposer);
     runInitStep('initMessageHistoryScroll', initMessageHistoryScroll);
     runInitStep('initMessageRetentionSweep', initMessageRetentionSweep);
+    runInitStep('initDmRealtimeReconnect', () => {
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden || !isLoggedIn()) return;
+            reconnectDmRealtime();
+        });
+        window.addEventListener('online', () => {
+            if (!isLoggedIn()) return;
+            reconnectDmRealtime();
+        });
+    });
     runInitStep('initMessageInteractions', () => initMessageInteractions({
         messageContainer: document.getElementById('messageContainer'),
         isLoggedIn,
