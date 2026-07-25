@@ -23,6 +23,70 @@ let ringTimer = null;
 let muted = false;
 let connectedAt = null;
 let callLogRecorded = false;
+let remoteDescriptionSet = false;
+/** @type {RTCIceCandidateInit[]} */
+const pendingIceCandidates = [];
+
+function resetIceState() {
+    remoteDescriptionSet = false;
+    pendingIceCandidates.length = 0;
+}
+
+function toSessionDescription(sdp) {
+    if (!sdp) return null;
+    if (sdp instanceof RTCSessionDescription) return sdp;
+    if (typeof sdp === 'object' && sdp.type && sdp.sdp) {
+        return new RTCSessionDescription(sdp);
+    }
+    return null;
+}
+
+async function flushPendingIceCandidates() {
+    if (!pc || !remoteDescriptionSet || !pc.remoteDescription) return;
+    while (pendingIceCandidates.length) {
+        const init = pendingIceCandidates.shift();
+        try {
+            await pc.addIceCandidate(new RTCIceCandidate(init));
+        } catch {
+            /* stale */
+        }
+    }
+}
+
+async function queueOrAddIceCandidate(candidateInit) {
+    if (!pc || !candidateInit) return;
+    if (!remoteDescriptionSet || !pc.remoteDescription) {
+        pendingIceCandidates.push(candidateInit);
+        return;
+    }
+    try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidateInit));
+    } catch {
+        /* ignore stale */
+    }
+}
+
+async function markRemoteDescriptionSet() {
+    remoteDescriptionSet = true;
+    await flushPendingIceCandidates();
+}
+
+async function playRemoteAudio() {
+    if (!remoteAudioEl?.srcObject) return;
+    remoteAudioEl.volume = 1;
+    remoteAudioEl.muted = false;
+    try {
+        await remoteAudioEl.play();
+    } catch (err) {
+        console.warn('[voice-call] Uzak ses oynatılamadı:', err);
+    }
+}
+
+function attachRemoteStream(stream) {
+    if (!stream || !remoteAudioEl) return;
+    remoteAudioEl.srcObject = stream;
+    void playRemoteAudio();
+}
 
 function el(id) {
     return document.getElementById(id);
@@ -113,6 +177,7 @@ async function fetchIceServers() {
 }
 
 async function createPeerConnection() {
+    resetIceState();
     const iceServers = await fetchIceServers();
     const connection = new RTCPeerConnection({ iceServers });
 
@@ -125,10 +190,12 @@ async function createPeerConnection() {
     };
 
     connection.ontrack = (event) => {
-        const stream = event.streams?.[0];
-        if (!stream || !remoteAudioEl) return;
-        remoteAudioEl.srcObject = stream;
-        void remoteAudioEl.play().catch(() => {});
+        let stream = event.streams?.[0];
+        if (!stream && event.track) {
+            stream = new MediaStream([event.track]);
+        }
+        attachRemoteStream(stream);
+        event.track.onunmute = () => void playRemoteAudio();
     };
 
     connection.onconnectionstatechange = () => {
@@ -136,12 +203,19 @@ async function createPeerConnection() {
         if (state === 'connected') {
             setPhase('connected');
             clearRingTimer();
+            void playRemoteAudio();
         } else if (state === 'failed') {
             deps?.showToast?.('Bağlantı kurulamadı.', { type: 'warning' });
             void teardownCall({ notifyRemote: true, reason: 'hangup' });
         } else if (state === 'disconnected') {
             deps?.showToast?.('Bağlantı koptu.', { type: 'warning' });
             void teardownCall({ notifyRemote: true, reason: 'hangup' });
+        }
+    };
+
+    connection.oniceconnectionstatechange = () => {
+        if (connection.iceConnectionState === 'connected' || connection.iceConnectionState === 'completed') {
+            void playRemoteAudio();
         }
     };
 
@@ -161,11 +235,31 @@ async function ensureLocalAudio() {
     return localStream;
 }
 
+function ensureAudioTransceiver(connection) {
+    const hasAudio = connection.getSenders().some((s) => s.track?.kind === 'audio');
+    if (!hasAudio) {
+        connection.addTransceiver('audio', { direction: 'sendrecv' });
+    }
+}
+
 function attachLocalTracks(connection) {
     if (!localStream) return;
-    for (const track of localStream.getTracks()) {
-        connection.addTrack(track, localStream);
+    const track = localStream.getAudioTracks()[0];
+    if (!track) return;
+
+    const senderWithTrack = connection.getSenders().find((s) => s.track?.kind === 'audio');
+    if (senderWithTrack) {
+        void senderWithTrack.replaceTrack(track);
+        return;
     }
+
+    const emptySender = connection.getSenders().find((s) => !s.track);
+    if (emptySender) {
+        void emptySender.replaceTrack(track);
+        return;
+    }
+
+    connection.addTrack(track, localStream);
 }
 
 async function sendSignal(extra) {
@@ -242,6 +336,7 @@ function syncCallUi() {
 
     document.body.classList.toggle('voice-call-active', showOverlay);
     document.body.classList.toggle('voice-call-connected', inCall);
+    if (inCall) void playRemoteAudio();
 }
 
 export function isVoiceCallSupported() {
@@ -276,6 +371,7 @@ export function updateTopbarCallButtonVisibility(visible) {
 async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
     clearRingTimer();
     pendingOffer = null;
+    resetIceState();
 
     const endPhase = phase;
     const endIsCaller = isCaller;
@@ -292,6 +388,7 @@ async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
         pc.onicecandidate = null;
         pc.ontrack = null;
         pc.onconnectionstatechange = null;
+        pc.oniceconnectionstatechange = null;
         pc.close();
         pc = null;
     }
@@ -357,8 +454,11 @@ async function acceptIncoming() {
         setPhase('ringing');
         pc = await createPeerConnection();
         await ensureLocalAudio();
+        const offerSdp = toSessionDescription(pendingOffer);
+        if (!offerSdp) throw new Error('Geçersiz arama teklifi.');
+        await pc.setRemoteDescription(offerSdp);
+        await markRemoteDescriptionSet();
         attachLocalTracks(pc);
-        await pc.setRemoteDescription(pendingOffer);
         pendingOffer = null;
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -366,6 +466,7 @@ async function acceptIncoming() {
             type: 'answer',
             sdp: pc.localDescription
         });
+        void playRemoteAudio();
     } catch (err) {
         deps?.showToast?.(err instanceof Error ? err.message : 'Arama kabul edilemedi.', { type: 'error' });
         await sendSignal({ type: 'decline' }).catch(() => {});
@@ -435,9 +536,13 @@ async function handleAnswer(payload) {
     if (!pc || payload.call_id !== callId || !payload.sdp) return;
 
     try {
-        await pc.setRemoteDescription(payload.sdp);
+        const answerSdp = toSessionDescription(payload.sdp);
+        if (!answerSdp) throw new Error('Geçersiz yanıt');
+        await pc.setRemoteDescription(answerSdp);
+        await markRemoteDescriptionSet();
         setPhase('ringing');
         clearRingTimer();
+        void playRemoteAudio();
     } catch {
         deps?.showToast?.('Arama yanıtı işlenemedi.', { type: 'error' });
         await teardownCall({ notifyRemote: true, reason: 'hangup' });
@@ -446,11 +551,7 @@ async function handleAnswer(payload) {
 
 async function handleIce(payload) {
     if (!pc || payload.call_id !== callId || !payload.candidate) return;
-    try {
-        await pc.addIceCandidate(payload.candidate);
-    } catch {
-        /* ignore stale */
-    }
+    await queueOrAddIceCandidate(payload.candidate);
 }
 
 export async function handleVoiceCallSignal(payload) {
@@ -522,9 +623,10 @@ export async function startVoiceCall() {
         setPhase('calling');
         pc = await createPeerConnection();
         await ensureLocalAudio();
+        ensureAudioTransceiver(pc);
         attachLocalTracks(pc);
 
-        const offer = await pc.createOffer({ offerToReceiveAudio: true });
+        const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
         const sent = await sendSignal({

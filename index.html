@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="theme-color" content="#2077c5">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -128,36 +128,24 @@
             box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 20px 60px rgba(15, 23, 42, 0.2);
         }
 
-        @media (max-width: 768px), (hover: none) and (pointer: coarse) {
-            #appTopbar,
-            #messageInputArea,
-            .voice-call-in-bar {
-                transition: transform 0.28s ease, opacity 0.28s ease;
-                will-change: transform;
+        @media (max-width: 768px) {
+            html.mobile-browser-chrome {
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                height: 100%;
             }
 
-            body.chat-chrome-hidden #appTopbar {
-                transform: translateY(calc(-100% - env(safe-area-inset-top, 0px)));
-                opacity: 0;
-                pointer-events: none;
+            html.mobile-browser-chrome body {
+                min-height: calc(100vh + 2px);
+                min-height: calc(var(--vvh, 100vh) + 2px);
+                overflow: visible;
+                height: auto;
             }
 
-            body.chat-chrome-hidden #messageInputArea:not([hidden]) {
-                transform: translateY(calc(100% + var(--safe-bottom)));
-                opacity: 0;
-                pointer-events: none;
-            }
-
-            body.chat-chrome-hidden .voice-call-in-bar:not([hidden]) {
-                transform: translateY(-100%);
-                opacity: 0;
-                pointer-events: none;
-            }
-
-            body.chat-chrome-hidden.voice-call-active .voice-call-in-bar:not([hidden]) {
-                transform: none;
-                opacity: 1;
-                pointer-events: auto;
+            html.mobile-browser-chrome .app-shell {
+                height: 100dvh;
+                height: var(--vvh, 100dvh);
+                min-height: var(--vvh, 100dvh);
             }
         }
 
@@ -195,6 +183,9 @@
 
             .app-body {
                 flex-direction: row;
+                align-items: stretch;
+                flex: 1;
+                min-height: 0;
             }
 
             .sidebar-overlay {
@@ -202,15 +193,17 @@
             }
 
             .sidebar {
-                position: relative;
-                top: auto;
-                left: auto;
-                bottom: auto;
+                position: relative !important;
+                top: auto !important;
+                left: auto !important;
+                bottom: auto !important;
                 transform: none !important;
+                flex: 0 0 min(420px, 36vw);
                 width: min(420px, 36vw);
                 min-width: 300px;
                 max-width: 480px;
-                flex-shrink: 0;
+                height: auto;
+                align-self: stretch;
                 box-shadow: none;
                 z-index: 1;
             }
@@ -247,14 +240,36 @@
             }
 
             .main-content {
-                flex: 1;
+                flex: 1 1 0;
                 min-width: 0;
+                width: auto;
+                max-width: none;
                 border-left: 1px solid var(--border-color);
                 background: #f0f2f5;
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
             }
 
             #chat-panel {
+                flex: 1;
+                min-height: 0;
                 background: #efeae2;
+            }
+
+            .main-content > .view-panel.active {
+                flex: 1;
+                min-height: 0;
+            }
+
+            #chat-panel .message-container {
+                flex: 1;
+                min-height: 0;
+            }
+
+            #chat-panel .input-area {
+                flex-shrink: 0;
+                width: 100%;
             }
 
             body.chats-home-view #chat-panel {
@@ -1745,6 +1760,16 @@
 
         .voice-call-in-bar__btn--mute {
             background: rgba(255, 255, 255, 0.22);
+        }
+
+        #voiceCallRemoteAudio {
+            position: fixed;
+            width: 0;
+            height: 0;
+            opacity: 0;
+            pointer-events: none;
+            left: 0;
+            bottom: 0;
         }
 
         @keyframes mic-pulse {
@@ -4714,7 +4739,7 @@
             </div>
         </div>
     </div>
-    <audio id="voiceCallRemoteAudio" autoplay playsinline hidden></audio>
+    <audio id="voiceCallRemoteAudio" autoplay playsinline></audio>
 
     <div class="search-overlay" id="searchOverlay" hidden>
         <div class="search-panel" role="dialog" aria-modal="true" aria-label="Arama">

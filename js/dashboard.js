@@ -143,6 +143,7 @@ import {
     clearUserInviteQuery
 } from './app-routes.js';
 import { initScrollChrome, resetScrollChrome } from './scroll-chrome.js';
+import { initDevMobilePreview } from './dev-mobile-preview.js';
 import {
     initHmCamouflage,
     syncHmProfileUi,
@@ -4260,6 +4261,7 @@ async function initDashboard() {
     runInitStep('initMediaComposer', initMediaComposer);
     runInitStep('initMessageHistoryScroll', initMessageHistoryScroll);
     runInitStep('initScrollChrome', initScrollChrome);
+    runInitStep('initDevMobilePreview', initDevMobilePreview);
     syncDesktopLayout();
     window.matchMedia('(max-width: 768px)').addEventListener('change', () => {
         syncDesktopLayout();
