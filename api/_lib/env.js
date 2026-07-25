@@ -47,7 +47,7 @@ export function bootstrapEnv() {
     }
 }
 
-function env(name, fallback = '') {
+export function env(name, fallback = '') {
     bootstrapEnv();
     const value = process.env[name];
     if (typeof value === 'string' && value.trim()) {

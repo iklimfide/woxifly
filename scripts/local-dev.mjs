@@ -48,6 +48,7 @@ const API_HANDLERS = [
     { pattern: /^\/api\/avatar-remove$/, module: 'avatar-remove' },
     { pattern: /^\/api\/push-subscribe$/, module: 'push-subscribe', jsonBody: true },
     { pattern: /^\/api\/push-vapid-public$/, module: 'push-vapid-public' },
+    { pattern: /^\/api\/turn-credentials$/, module: 'turn-credentials' },
     { pattern: /^\/api\/push-notify$/, module: 'push-notify', jsonBody: true },
     { pattern: /^\/api\/r2-cleanup$/, module: 'r2-cleanup' }
 ];

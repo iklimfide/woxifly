@@ -4,6 +4,18 @@ let supabaseClient = null;
 const seenClientIds = new Set();
 const notificationChannels = new Map();
 const notificationSeenClientIds = new Set();
+const notificationChannelByConversation = new Map();
+
+function dispatchCallSignal(payload) {
+    if (!payload?.call_id || !payload?.type) return;
+    onCallSignal?.(payload);
+}
+
+let onCallSignal = null;
+
+export function setVoiceCallSignalHandler(handler) {
+    onCallSignal = typeof handler === 'function' ? handler : null;
+}
 
 function presenceKey(userId) {
     return userId;
@@ -29,6 +41,7 @@ export function leaveDmNotificationRooms() {
         }
     }
     notificationChannels.clear();
+    notificationChannelByConversation.clear();
     notificationSeenClientIds.clear();
 }
 
@@ -47,6 +60,7 @@ export function syncDmNotificationRooms(supabase, conversationIds, {
         if (!targetIds.has(convId) || convId === activeConversationId) {
             supabase.removeChannel(channel);
             notificationChannels.delete(convId);
+            notificationChannelByConversation.delete(convId);
         }
     }
 
@@ -66,9 +80,12 @@ export function syncDmNotificationRooms(supabase, conversationIds, {
             onMessage?.(payload, convId);
         }).on('broadcast', { event: 'reaction' }, ({ payload }) => {
             onReaction?.(payload, convId);
+        }).on('broadcast', { event: 'call' }, ({ payload }) => {
+            dispatchCallSignal(payload);
         }).subscribe();
 
         notificationChannels.set(convId, channel);
+        notificationChannelByConversation.set(convId, channel);
     }
 }
 
@@ -104,6 +121,9 @@ export function joinDmRoom(supabase, conversationId, { userId, username, onMessa
         })
         .on('broadcast', { event: 'message_edit' }, ({ payload }) => {
             onEdit?.(payload);
+        })
+        .on('broadcast', { event: 'call' }, ({ payload }) => {
+            dispatchCallSignal(payload);
         })
         .on('presence', { event: 'sync' }, () => onPresence?.(countPresence(channel)))
         .subscribe(async (status) => {
@@ -200,4 +220,43 @@ export async function broadcastReaction(payload) {
     } catch (err) {
         console.error('Tepki yayını gönderilemedi:', err);
     }
+}
+
+async function sendCallOnChannel(channel, payload) {
+    if (!channel) return false;
+    try {
+        await Promise.race([
+            channel.send({
+                type: 'broadcast',
+                event: 'call',
+                payload
+            }),
+            new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Arama sinyali zaman aşımı')), 5000);
+            })
+        ]);
+        return true;
+    } catch (err) {
+        console.error('Arama sinyali gönderilemedi:', err);
+        return false;
+    }
+}
+
+export async function broadcastCallSignal(payload) {
+    if (!payload?.conversation_id) return false;
+
+    if (activeChannel && activeRoomKey === `dm:${payload.conversation_id}`) {
+        return sendCallOnChannel(activeChannel, payload);
+    }
+
+    const notifyChannel = notificationChannelByConversation.get(payload.conversation_id);
+    if (notifyChannel) {
+        return sendCallOnChannel(notifyChannel, payload);
+    }
+
+    if (activeChannel) {
+        return sendCallOnChannel(activeChannel, payload);
+    }
+
+    return false;
 }

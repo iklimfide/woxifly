@@ -1,6 +1,6 @@
 import { supabase } from './supabase-client.js';
 import { getMessageRetentionCutoffIso } from './config.js';
-import { resolveAvatarMediaUrl, displayMediaUrl } from './media/urls.js';
+import { formatDisplayUsername } from './utils.js';
 import { closeTopbarMenus } from './topbar.js';
 import { PROFILE_DIRECTORY } from './profile-directory.js';
 
@@ -103,14 +103,14 @@ function createUserRow(profile) {
         img.loading = 'lazy';
         avatar.appendChild(img);
     } else {
-        avatar.textContent = (profile.username || '?').charAt(0).toUpperCase();
+        avatar.textContent = formatDisplayUsername(profile.username || '?').charAt(0);
     }
 
     const body = document.createElement('div');
     body.className = 'search-result-item__body';
     const name = document.createElement('span');
     name.className = 'search-result-item__title';
-    name.textContent = profile.username || 'Kullanıcı';
+    name.textContent = formatDisplayUsername(profile.username);
     const meta = document.createElement('span');
     meta.className = 'search-result-item__meta';
     meta.textContent = 'Kişi';
@@ -155,7 +155,7 @@ function createMessageRow(message, query) {
     title.textContent = previewMessageBody(message.body, query);
     const meta = document.createElement('span');
     meta.className = 'search-result-item__meta';
-    const sender = message.sender_username || 'Kullanıcı';
+    const sender = formatDisplayUsername(message.sender_username);
     const time = message.created_at
         ? new Date(message.created_at).toLocaleString('tr-TR', {
             day: '2-digit',

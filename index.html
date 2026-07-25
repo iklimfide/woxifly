@@ -1386,6 +1386,65 @@
             color: #c53030;
         }
 
+        .voice-call-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 650;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 16px;
+            padding-bottom: max(16px, env(safe-area-inset-bottom));
+            background: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(4px);
+        }
+
+        .voice-call-overlay[hidden] { display: none !important; }
+
+        .voice-call-sheet {
+            width: min(420px, 100%);
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22);
+            padding: 20px 18px 18px;
+            text-align: center;
+        }
+
+        .voice-call-sheet h2 {
+            margin: 0 0 6px;
+            font-size: 1.15rem;
+            color: #0f172a;
+        }
+
+        .voice-call-status {
+            margin: 0 0 16px;
+            font-size: 0.9rem;
+            color: #64748b;
+        }
+
+        .voice-call-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .voice-call-btn {
+            border: none;
+            border-radius: 999px;
+            min-height: 44px;
+            padding: 0 18px;
+            font-size: 0.92rem;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .voice-call-btn--accept { background: #22c55e; color: #fff; }
+        .voice-call-btn--decline { background: #ef4444; color: #fff; }
+        .voice-call-btn--end { background: #ef4444; color: #fff; }
+        .voice-call-btn--mute { background: #e2e8f0; color: #334155; }
+
         @keyframes mic-pulse {
             0%, 100% { box-shadow: 0 0 0 0 rgba(229, 62, 62, 0.25); }
             50% { box-shadow: 0 0 0 6px rgba(229, 62, 62, 0); }
@@ -4277,6 +4336,22 @@
     </div>
 
     <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
+
+    <div class="voice-call-overlay" id="voiceCallOverlay" hidden>
+        <div class="voice-call-sheet">
+            <h2 id="voiceCallPartnerName">Kullanıcı</h2>
+            <p class="voice-call-status" id="voiceCallStatus"></p>
+            <div id="voiceCallIncoming" class="voice-call-actions" hidden>
+                <button type="button" class="voice-call-btn voice-call-btn--decline" id="voiceCallDeclineBtn">Reddet</button>
+                <button type="button" class="voice-call-btn voice-call-btn--accept" id="voiceCallAcceptBtn">Kabul et</button>
+            </div>
+            <div id="voiceCallActive" class="voice-call-actions" hidden>
+                <button type="button" class="voice-call-btn voice-call-btn--mute" id="voiceCallMuteBtn" hidden>Sessiz</button>
+                <button type="button" class="voice-call-btn voice-call-btn--end" id="voiceCallEndBtn">Kapat</button>
+            </div>
+        </div>
+    </div>
+    <audio id="voiceCallRemoteAudio" autoplay playsinline hidden></audio>
 
     <div class="search-overlay" id="searchOverlay" hidden>
         <div class="search-panel" role="dialog" aria-modal="true" aria-label="Arama">

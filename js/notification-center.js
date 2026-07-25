@@ -1,4 +1,5 @@
 import { closeTopbarMenus } from './topbar.js';
+import { formatDisplayUsername } from './utils.js';
 
 const STORAGE_KEY = 'woxifly_notifications';
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -450,7 +451,7 @@ export function addInAppNotification({
     const mergeKey = notificationMergeKey({ chatId, senderId });
     if (!mergeKey) return;
 
-    const displayTitle = senderName || title || 'Kullanıcı';
+    const displayTitle = formatDisplayUsername(senderName || title);
     const now = new Date().toISOString();
 
     const existingIndex = items.findIndex((item) => item.mergeKey === mergeKey);

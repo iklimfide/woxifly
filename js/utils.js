@@ -20,6 +20,15 @@ export function isValidUsername(username) {
     return /^[\p{L}\p{N}_.-]{2,24}$/u.test(username);
 }
 
+/** Rumuz ekranda ilk harf büyük (tr-TR): hazalca → Hazalca */
+export function formatDisplayUsername(username) {
+    const raw = String(username ?? '').trim();
+    if (!raw) return 'Kullanıcı';
+    if (raw === 'Kullanıcı' || raw === 'Misafir') return raw;
+    const normalized = raw.toLocaleLowerCase('tr-TR');
+    return normalized.charAt(0).toLocaleUpperCase('tr-TR') + normalized.slice(1);
+}
+
 export function isValidEmail(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -111,7 +120,8 @@ export function isQuoteFromViewer(quote, { userId = null, username = null } = {}
 export function formatQuoteAuthorLabel(quote, viewer = {}) {
     const senderName = quote?.sender_name || quote?.sender || 'Kullanıcı';
     if (isQuoteFromViewer(quote, viewer)) return 'Ben';
-    return senderName.startsWith('@') ? senderName : `@${senderName}`;
+    const label = formatDisplayUsername(senderName.replace(/^@/, ''));
+    return `@${label}`;
 }
 
 const URL_REGEX = /\b((?:https?:\/\/)[^\s<]+|(?:www\.)[^\s<]+|(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(?::\d{1,5})?(?:\/[^\s<]*)?)/gi;
@@ -317,13 +327,14 @@ export function createMessageElement({
     const senderEl = document.createElement('span');
     senderEl.className = 'message-sender';
     if (isOutgoing) senderEl.style.color = '#1a3a5f';
-    senderEl.textContent = isOutgoing ? 'Ben' : `@${sender}`;
+    const displaySender = isOutgoing ? 'Ben' : `@${formatDisplayUsername(sender)}`;
+    senderEl.textContent = displaySender;
 
     if (showSender && !isOutgoing && onSenderClick) {
         senderEl.classList.add('clickable');
         senderEl.setAttribute('role', 'button');
         senderEl.tabIndex = 0;
-        senderEl.title = `${sender} ile özel sohbet aç`;
+        senderEl.title = `${formatDisplayUsername(sender)} ile özel sohbet aç`;
 
         const openDm = (event) => {
             event.stopPropagation();

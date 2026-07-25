@@ -1,4 +1,4 @@
-import { formatTime, appendTextWithLinks } from './utils.js';
+import { formatTime, appendTextWithLinks, formatDisplayUsername } from './utils.js';
 import { resolveMessageMediaUrl, resolveAvatarMediaUrl, displayMediaUrl } from './media/urls.js';
 import { openViewer } from './media/viewer.js';
 
@@ -160,8 +160,8 @@ function formatMemberDate(iso) {
 }
 
 function memberInitial(username) {
-    const value = String(username || '?').trim();
-    return value ? value.charAt(0).toUpperCase() : '?';
+    const value = formatDisplayUsername(username || '?');
+    return value.charAt(0) || '?';
 }
 
 function memberAvatarSrc(member) {
@@ -199,7 +199,7 @@ function renderMembersList({ append = false } = {}) {
             ${avatar}
             <div class="cloud-member-item__body">
                 <div class="cloud-member-item__title">
-                    <span>${escapeHtml(member.username)}</span>
+                    <span>${escapeHtml(formatDisplayUsername(member.username))}</span>
                 </div>
                 <span class="cloud-member-item__meta">${escapeHtml(member.location)} · ${escapeHtml(formatMemberDate(member.createdAt))}</span>
                 ${member.email ? `<span class="cloud-member-item__email">${escapeHtml(member.email)}</span>` : ''}
@@ -352,7 +352,7 @@ function createCloudMessageRow(message) {
     head.className = 'cloud-msg__head';
 
     const sender = document.createElement('strong');
-    sender.textContent = message.senderName || 'Kullanıcı';
+    sender.textContent = formatDisplayUsername(message.senderName);
 
     const time = document.createElement('span');
     time.className = 'cloud-msg__time';

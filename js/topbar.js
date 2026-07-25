@@ -29,6 +29,7 @@ body.member-profile-view #headerTitleChat{cursor:pointer}
 .app-topbar__icon-btn{width:40px;height:40px;border:none;border-radius:50%;background:rgba(255,255,255,.18);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;position:relative;overflow:hidden;font-weight:700;font-size:.95rem;font-family:inherit;flex-shrink:0;line-height:1}
 .app-topbar__pp-btn{border:2px solid rgba(255,255,255,.95);background:rgba(255,255,255,.22)}
 .app-topbar__icon-btn:active{transform:scale(.96)}
+.app-topbar__icon-btn--active{background:rgba(255,255,255,.38);box-shadow:0 0 0 2px rgba(255,255,255,.45) inset}
 .app-topbar__icon-btn img{width:100%;height:100%;object-fit:cover;display:block}
 .app-topbar__icon-btn svg{width:20px;height:20px;fill:currentColor;display:block}
 .app-topbar__search[hidden]{display:none!important}
@@ -96,6 +97,9 @@ function mountTopbar() {
                 </div>
             </div>
             <div class="app-topbar__end">
+                <button type="button" class="app-topbar__icon-btn app-topbar__call" id="topbarCallBtn" aria-label="Sesli ara" hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1-.24c1.12.37 2.33.57 3.59.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.26.2 2.47.57 3.59a1 1 0 0 1-.24 1l-2.2 2.2Z"/></svg>
+                </button>
                 <button type="button" class="app-topbar__icon-btn app-topbar__search" id="topbarSearchBtn" aria-label="Ara" hidden>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5Zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14Z"/></svg>
                 </button>

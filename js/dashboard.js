@@ -37,9 +37,10 @@ import {
     broadcastShout,
     broadcastReaction,
     broadcastMessageDelete,
-    broadcastMessageEdit
+    broadcastMessageEdit,
+    setVoiceCallSignalHandler
 } from './realtime-chat.js';
-import { sanitizeText, isValidUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles, initPinVisibilityToggles, appendMessageToContainer, createMessageDateSeparator, getCalendarDayKey } from './utils.js';
+import { sanitizeText, isValidUsername, formatDisplayUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles, initPinVisibilityToggles, appendMessageToContainer, createMessageDateSeparator, getCalendarDayKey } from './utils.js';
 import {
     startVoiceRecording,
     stopVoiceRecording,
@@ -56,6 +57,14 @@ import {
     startRecordingUi,
     stopRecordingUi
 } from './voice-message-ui.js';
+import {
+    initVoiceCall,
+    handleVoiceCallSignal,
+    onVoiceCallConversationContext,
+    clearVoiceCallConversationContext,
+    updateTopbarCallButtonVisibility,
+    endVoiceCall
+} from './voice-call.js';
 import {
     initNotificationCenter,
     addInAppNotification,
@@ -468,6 +477,7 @@ function promptRegister() {
 function applyAvatarDisplay(element, url, fallbackLetter, r2Key = null) {
     if (!element) return;
     element.innerHTML = '';
+    const initial = formatDisplayUsername(fallbackLetter || '?').charAt(0) || '?';
     const src = displayMediaUrl(resolveAvatarMediaUrl(url, r2Key));
     if (src) {
         const img = document.createElement('img');
@@ -477,11 +487,11 @@ function applyAvatarDisplay(element, url, fallbackLetter, r2Key = null) {
         img.loading = 'eager';
         img.addEventListener('error', () => {
             element.innerHTML = '';
-            element.textContent = (fallbackLetter || '?').charAt(0).toUpperCase();
+            element.textContent = initial;
         }, { once: true });
         element.appendChild(img);
     } else {
-        element.textContent = (fallbackLetter || '?').charAt(0).toUpperCase();
+        element.textContent = initial;
     }
 }
 
@@ -501,7 +511,7 @@ async function resolveDmPartnerAvatar(userId, avatarUrl = null) {
 }
 
 function refreshAvatarDisplays() {
-    const letter = currentMyUsername?.charAt(0) || 'K';
+    const letter = formatDisplayUsername(currentMyUsername)?.charAt(0) || 'K';
     const avatarSrc = displayMediaUrl(resolveAvatarMediaUrl(currentMyAvatarUrl, currentMyAvatarR2Key));
     setTopbarProfileAvatar({
         imageUrl: avatarSrc,
@@ -545,7 +555,7 @@ function setMemberProfileField(wrapId, textId, value) {
 
 function renderMemberProfile(profile) {
     const username = profile.username || 'Kullanıcı';
-    document.getElementById('memberProfileUsername').textContent = username;
+    document.getElementById('memberProfileUsername').textContent = formatDisplayUsername(username);
     applyAvatarDisplay(
         document.getElementById('memberProfileAvatar'),
         profile.avatar_url,
@@ -561,7 +571,7 @@ function renderMemberProfile(profile) {
     const emptyEl = document.getElementById('memberProfileEmpty');
     if (emptyEl) emptyEl.hidden = hasAbout || hasLocation || hasJob || hasMarital;
 
-    document.getElementById('activeChatName').textContent = username;
+    document.getElementById('activeChatName').textContent = formatDisplayUsername(username);
     const activeChatAvatar = document.getElementById('activeChatAvatar');
     if (activeChatAvatar) activeChatAvatar.hidden = false;
     applyAvatarDisplay(activeChatAvatar, profile.avatar_url, username, null);
@@ -904,7 +914,7 @@ function createBlockedUserRow(entry) {
 
     const name = document.createElement('span');
     name.className = 'blocked-user-item__name';
-    name.textContent = entry.username;
+    name.textContent = formatDisplayUsername(entry.username);
 
     const meta = document.createElement('span');
     meta.className = 'blocked-user-item__meta';
@@ -1279,10 +1289,13 @@ function showChatConversationUi() {
 }
 
 async function showChatListHome() {
+    await endVoiceCall();
     currentActiveChat = null;
     currentConversationId = null;
     leaveRealtimeRoom();
     refreshDmNotificationListeners();
+    clearVoiceCallConversationContext();
+    updateTopbarCallButtonVisibility(false);
     clearPendingQuote();
     clearPendingEdit();
     clearPendingComposerMedia();
@@ -1901,6 +1914,17 @@ function handleIncomingEditBroadcast(payload) {
         body: payload.body,
         editedAt: payload.edited_at || null
     });
+}
+
+function getActiveDmPartnerUserId() {
+    if (!currentActiveChat?.startsWith('User-')) return null;
+    return currentActiveChat.replace('User-', '');
+}
+
+async function openConversationForCall({ partnerUserId, partnerName }) {
+    if (!partnerUserId) return;
+    const name = partnerName || dmTitles.get(partnerUserId) || 'Kullanıcı';
+    await openChat(`User-${partnerUserId}`, name);
 }
 
 function subscribeDmRealtime(conversationId) {
@@ -3142,7 +3166,7 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
     switchView('chat-panel');
     if (isMobileLayout()) closeSidebar();
 
-    document.getElementById('activeChatName').textContent = title;
+    document.getElementById('activeChatName').textContent = formatDisplayUsername(title);
     const statusEl = document.getElementById('activeChatStatus');
     const activeChatAvatar = document.getElementById('activeChatAvatar');
     if (activeChatAvatar) activeChatAvatar.hidden = false;
@@ -3164,11 +3188,20 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
         clearMessageContainer();
         showEmptyChat();
         leaveRealtimeRoom();
+        clearVoiceCallConversationContext();
+        updateTopbarCallButtonVisibility(false);
+        saveAppRoute();
         return;
     }
 
     subscribeDmRealtime(currentConversationId);
     refreshDmNotificationListeners();
+    onVoiceCallConversationContext({
+        conversationId: currentConversationId,
+        partnerUserId: userId,
+        partnerName: title
+    });
+    updateTopbarCallButtonVisibility(true);
     await loadMessageHistory(currentConversationId);
 
     updateMessageInputState();
@@ -3525,8 +3558,8 @@ function resolveChatListItem(target) {
 
 function getChatItemMeta(item) {
     const userId = item.id?.replace(/^user-/, '') || '';
-    const username = item.querySelector('.chat-name')?.textContent?.trim()
-        || dmTitles.get(userId)
+    const username = dmTitles.get(userId)
+        || item.querySelector('.chat-name')?.textContent?.trim()
         || 'Kullanıcı';
     return { userId, username };
 }
@@ -3716,7 +3749,7 @@ function addDmToSidebar(userId, username, preview = '', avatarUrl = null, {
 
     const name = document.createElement('span');
     name.className = 'chat-name';
-    name.textContent = username;
+    name.textContent = formatDisplayUsername(username);
 
     const top = document.createElement('div');
     top.className = 'chat-info-top';
@@ -4062,6 +4095,25 @@ async function initDashboard() {
     }));
     runInitStep('initMessageSelectionControls', initMessageSelectionControls);
     runInitStep('initChatListInteractions', initChatListInteractions);
+    runInitStep('initVoiceCall', () => {
+        setVoiceCallSignalHandler((payload) => {
+            void handleVoiceCallSignal(payload);
+        });
+        initVoiceCall({
+            isLoggedIn,
+            getUserId: () => currentUserId,
+            getConversationId: () => currentConversationId,
+            getPartnerUserId: getActiveDmPartnerUserId,
+            getPartnerDisplayName: () => {
+                const partnerId = getActiveDmPartnerUserId();
+                return partnerId ? (dmTitles.get(partnerId) || 'Kullanıcı') : 'Kullanıcı';
+            },
+            getMyUsername: () => currentMyUsername,
+            isPartnerBlocked: (userId) => isUserBlocked(userId),
+            openConversationForCall,
+            showToast
+        });
+    });
     document.getElementById('appHomeLink')?.addEventListener('click', (event) => {
         event.preventDefault();
         showChatListHome();

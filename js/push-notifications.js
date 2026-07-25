@@ -1,5 +1,6 @@
 import { supabase, getSession } from './supabase-client.js';
 import { parseLegacyNotifyParam, usernameToSlug } from './app-routes.js';
+import { formatDisplayUsername } from './utils.js';
 
 const MASKED_TITLE = 'Woxifly: Yeni bildirim';
 
@@ -191,7 +192,7 @@ export function maybeShowReactionForegroundNotification({
     if (!document.hidden && document.hasFocus() && viewingSameChat) return;
 
     const tag = `${buildNotificationTag({ userId })}-reaction`;
-    const displayName = reactorName || 'Birisi';
+    const displayName = formatDisplayUsername(reactorName || 'Birisi');
 
     const notification = new Notification(displayName, {
         body: `Mesajınıza ${emoji} tepkisi verdi`,
