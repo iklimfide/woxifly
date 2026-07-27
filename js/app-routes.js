@@ -1,4 +1,6 @@
-const RESERVED_TOP_LEVEL = new Set(['uye', 'profil', 'profile', 'sohbetler', 'chats', 'bulut']);
+import { normalizeInviteCode, isValidInviteCode } from './invite-code.js';
+
+const RESERVED_TOP_LEVEL = new Set(['uye', 'profil', 'profile', 'sohbetler', 'chats', 'bulut', 'davet']);
 
 export function usernameToSlug(username) {
     if (!username) return '';
@@ -18,6 +20,12 @@ export function buildAppPath({ activePanel, currentActiveChat } = {}) {
 
 export function parseUserInviteQuery() {
     const params = new URLSearchParams(window.location.search);
+    const davetRaw = params.get('davet') || params.get('invite');
+    if (davetRaw?.trim()) {
+        const code = normalizeInviteCode(davetRaw);
+        if (isValidInviteCode(code)) return { inviteCode: code };
+    }
+
     const raw = params.get('u') || params.get('uye');
     if (!raw?.trim()) return null;
     const slug = usernameToSlug(raw.trim()) || raw.trim().toLowerCase();
@@ -26,9 +34,11 @@ export function parseUserInviteQuery() {
 
 export function clearUserInviteQuery() {
     const params = new URLSearchParams(window.location.search);
-    if (!params.has('u') && !params.has('uye')) return;
+    if (!params.has('u') && !params.has('uye') && !params.has('davet') && !params.has('invite')) return;
     params.delete('u');
     params.delete('uye');
+    params.delete('davet');
+    params.delete('invite');
     const qs = params.toString();
     history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
 }
@@ -46,6 +56,12 @@ export function parseAppPath(pathname) {
 
     if (path === '/bulut') {
         return { view: 'bulut-panel' };
+    }
+
+    const inviteMatch = path.match(/^\/davet\/([^/]+)$/i);
+    if (inviteMatch) {
+        const code = normalizeInviteCode(decodeURIComponent(inviteMatch[1]));
+        if (isValidInviteCode(code)) return { inviteCode: code };
     }
 
     const dmProfileMatch = path.match(/^\/uye\/([^/]+)\/profil$/i);
@@ -124,7 +140,7 @@ export function shouldForcePwaHomeStart({ hasNotifyRoute = false } = {}) {
 
     if (route.view === 'chats-home') return false;
     if (route.view === 'profile-panel' || route.view === 'bulut-panel') return false;
-    if (route.view === 'member-profile' || route.usernameSlug || route.userId) return false;
+    if (route.view === 'member-profile' || route.usernameSlug || route.userId || route.inviteCode) return false;
 
     return true;
 }

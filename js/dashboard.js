@@ -1,6 +1,5 @@
 import { supabase, getSession, fetchWithAuth, initSessionKeepAlive, getAccessTokenForApi } from './supabase-client.js';
-import { initAuthModal, openAuthModal, isUsernameAvailable } from './auth-modal.js';
-import { normalizeLoginUsername } from './auth-identity.js';
+import { initAuthModal, openAuthModal } from './auth-modal.js';
 import { initWelcomeModal, maybeShowWelcomeModal, closeWelcomeModal } from './welcome-modal.js';
 import { initNotifyModal, showNotify, showToast, showConfirmToast, closeNotifyModal } from './notify-modal.js';
 import { initLinkViewer } from './link-viewer.js';
@@ -143,6 +142,11 @@ import {
     replaceAppPath,
     clearUserInviteQuery
 } from './app-routes.js';
+import {
+    normalizeInviteCode,
+    isValidInviteCode,
+    buildInviteUrl
+} from './invite-code.js';
 import { initScrollChrome, resetScrollChrome } from './scroll-chrome.js';
 import { initDevMobilePreview } from './dev-mobile-preview.js';
 import {
@@ -183,6 +187,7 @@ let pendingForward = null;
 let pendingForwardSourceChat = null;
 let pendingComposerMedia = null;
 let currentMyUsername = 'Misafir';
+let currentMyInviteCode = null;
 let currentMyAvatarUrl = null;
 let currentMyAvatarR2Key = null;
 let currentActiveChat = null;
@@ -390,6 +395,88 @@ async function openDmByUsernameSlug(usernameSlug) {
     await openMemberProfile(profile.id, { push: false, fromChat: false });
 }
 
+async function resolveUserByInviteCode(code) {
+    if (!code || !isLoggedIn()) return null;
+    const normalized = normalizeInviteCode(code);
+    if (!isValidInviteCode(normalized)) return null;
+
+    const { data, error } = await supabase.rpc('resolve_profile_by_invite_code', {
+        p_code: normalized
+    });
+
+    if (error) {
+        console.warn('[invite] çözümleme:', error.message);
+        return null;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row?.id) return null;
+    return row;
+}
+
+async function ensureMyInviteCode() {
+    if (currentMyInviteCode) return currentMyInviteCode;
+    if (!isLoggedIn()) return null;
+
+    const { data, error } = await supabase.rpc('ensure_my_invite_code');
+    if (error) {
+        console.warn('[invite] kod:', error.message);
+        return null;
+    }
+
+    const code = normalizeInviteCode(data);
+    if (isValidInviteCode(code)) {
+        currentMyInviteCode = code;
+        updateProfileShareLink();
+    }
+    return currentMyInviteCode;
+}
+
+async function openDmByInviteCode(code) {
+    if (!isLoggedIn()) {
+        await showChatListHome();
+        promptLogin();
+        return;
+    }
+
+    const normalized = normalizeInviteCode(code);
+    if (!isValidInviteCode(normalized)) {
+        showToast('Geçersiz davet kodu.', { type: 'warning' });
+        await showChatListHome();
+        return;
+    }
+
+    await ensureMyInviteCode();
+    if (currentMyInviteCode === normalized) {
+        switchView('profile-panel');
+        clearUserInviteQuery();
+        replaceAppPath('/profil');
+        return;
+    }
+
+    const profile = await resolveUserByInviteCode(normalized);
+    if (!profile) {
+        showToast('Davet kodu bulunamadı.', { type: 'info' });
+        await showChatListHome();
+        return;
+    }
+
+    clearUserInviteQuery();
+
+    const blockStatus = await fetchBlockStatus(profile.id);
+    if (blockStatus.isBlocked) {
+        if (blockStatus.blockedByMe) {
+            await openMemberProfile(profile.id, { push: false, fromChat: false });
+            return;
+        }
+        showNotify('Bu kullanıcıyla mesajlaşamazsınız.', { title: 'Engel', type: 'warning' });
+        await showChatListHome();
+        return;
+    }
+
+    await openDmByUserId(profile.id, profile.username, profile.avatar_url || null);
+}
+
 async function restoreAppRoute(route) {
     if (route.view === 'chats-home') {
         await showChatListHome();
@@ -444,6 +531,11 @@ async function restoreAppRoute(route) {
 
     if (route.userId) {
         await openDmByUserId(route.userId);
+        return;
+    }
+
+    if (route.inviteCode) {
+        await openDmByInviteCode(route.inviteCode);
         return;
     }
 
@@ -951,7 +1043,8 @@ function getProfileShareUsername() {
 }
 
 function buildProfileShareUrl() {
-    return `${window.location.origin}/`;
+    if (!currentMyInviteCode) return null;
+    return buildInviteUrl(currentMyInviteCode);
 }
 
 function updateProfileShareLink() {
@@ -965,9 +1058,17 @@ function updateProfileShareLink() {
         return;
     }
 
+    if (!currentMyInviteCode) {
+        linkEl.textContent = 'Yükleniyor…';
+        linkEl.disabled = true;
+        linkEl.title = 'Davet kodu hazırlanıyor';
+        void ensureMyInviteCode();
+        return;
+    }
+
     const url = buildProfileShareUrl();
-    linkEl.textContent = url;
-    linkEl.title = 'Woxifly ana linki — kişi bulmak için üstteki aramayı kullanın';
+    linkEl.textContent = currentMyInviteCode;
+    linkEl.title = url || 'Davet linki';
     linkEl.disabled = false;
 }
 
@@ -977,15 +1078,16 @@ async function copyProfileShareUrl() {
         return;
     }
 
+    await ensureMyInviteCode();
     const url = buildProfileShareUrl();
     if (!url) {
-        showToast('Profil linki oluşturulamadı.', { type: 'warning' });
+        showToast('Davet linki oluşturulamadı.', { type: 'warning' });
         return;
     }
 
     try {
         await navigator.clipboard.writeText(url);
-        showToast('Profil linki panoya kopyalandı.', { type: 'success' });
+        showToast('Davet linki panoya kopyalandı.', { type: 'success' });
     } catch {
         showToast('Kopyalama başarısız oldu.', { type: 'error' });
     }
@@ -999,15 +1101,21 @@ async function shareProfile() {
 
     const url = buildProfileShareUrl();
     if (!url) {
-        showNotify('Profil linki oluşturulamadı.', { title: 'Paylaş', type: 'warning' });
+        await ensureMyInviteCode();
+    }
+    const shareUrl = buildProfileShareUrl();
+    if (!shareUrl) {
+        showNotify('Davet linki oluşturulamadı.', { title: 'Paylaş', type: 'warning' });
         return;
     }
 
     const username = getProfileShareUsername();
     const shareData = {
         title: 'Woxifly',
-        text: username ? `@${formatDisplayUsername(username)} — Woxifly'de ara` : 'Woxifly',
-        url
+        text: username
+            ? `${formatDisplayUsername(username)} ile Woxifly'de sohbet et`
+            : 'Woxifly daveti',
+        url: shareUrl
     };
 
     if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {
@@ -1029,7 +1137,6 @@ function initProfileShare() {
     document.getElementById('profileShareBtn')?.addEventListener('click', () => {
         void shareProfile();
     });
-    document.getElementById('usernameInput')?.addEventListener('input', updateProfileShareLink);
 }
 
 function initProfileAvatar() {
@@ -1373,6 +1480,7 @@ async function loadProfile() {
     }
 
     document.getElementById('usernameInput').value = currentMyUsername;
+    void ensureMyInviteCode();
     updateProfileShareLink();
 
     refreshAvatarDisplays();
@@ -1392,27 +1500,6 @@ async function saveProfile() {
         return;
     }
 
-    const newName = sanitizeText(document.getElementById('usernameInput').value, 24);
-
-    if (!isValidUsername(newName)) {
-        showNotify('Rumuz 2-24 karakter olmalı; harf, rakam, _ . - kullanılabilir.', {
-            title: 'Geçersiz rumuz',
-            type: 'warning'
-        });
-        return;
-    }
-
-    if (normalizeLoginUsername(newName) !== normalizeLoginUsername(currentMyUsername)) {
-        const available = await isUsernameAvailable(newName, currentUserId);
-        if (!available) {
-            showNotify('Bu kullanıcı adı zaten kullanılıyor. Lütfen başka bir ad seçin.', {
-                title: 'Kullanıcı adı alınmış',
-                type: 'warning'
-            });
-            return;
-        }
-    }
-
     const hmEnabled = document.getElementById('hmPerdeInput')?.checked === true;
     const hmPinInput = document.getElementById('hmPinInput');
     const hmPin = hmPinInput?.value?.trim();
@@ -1430,7 +1517,6 @@ async function saveProfile() {
     }
 
     const { error } = await supabase.from('profiles').update({
-        username: newName,
         about_me: aboutText || null,
         home_location: profileDetails.home_location,
         job: profileDetails.job,
@@ -1439,10 +1525,7 @@ async function saveProfile() {
     }).eq('id', currentUserId);
 
     if (error) {
-        const msg = /username_format|profiles_username_check/i.test(error.message)
-            ? 'Rumuz 2–24 karakter olmalı; harf, rakam, _ . - kullanılabilir. Veritabanında fix-username-format-constraint.sql çalıştırın.'
-            : error.message;
-        showNotify('Profil kaydedilemedi: ' + msg, { title: 'Hata', type: 'error' });
+        showNotify('Profil kaydedilemedi: ' + error.message, { title: 'Hata', type: 'error' });
         return;
     }
 
@@ -1451,7 +1534,6 @@ async function saveProfile() {
         showNotify(hmResult.error, { title: 'Geçersiz PIN', type: 'warning' });
     }
 
-    currentMyUsername = newName;
     refreshTopbarMenu();
 
     await showChatListHome();
@@ -2307,6 +2389,10 @@ function initDashboardSearch() {
         isUserBlocked,
         onOpenUser: (userId, username) => openDmByUserId(userId, username),
         onJumpToMessage: jumpToSearchMessage
+    });
+
+    document.getElementById('sidebarMemberSearchBtn')?.addEventListener('click', () => {
+        openSearchPanel();
     });
 }
 
@@ -3579,9 +3665,20 @@ function renderDmEmptyState() {
     list.innerHTML = '';
     const empty = document.createElement('div');
     empty.className = 'chat-list-empty';
-    empty.textContent = isLoggedIn()
-        ? 'Henüz sohbet yok. Size gönderilen kullanıcı linki ile yeni bir sohbet başlatabilirsiniz.'
+    const message = document.createElement('p');
+    message.textContent = isLoggedIn()
+        ? 'Henüz sohbet yok. Üstteki aramadan üye adı ile arayarak yeni bir sohbet başlatabilirsiniz.'
         : 'Giriş yaparak sohbetlerinizi görüntüleyin.';
+    message.style.margin = '0';
+    empty.appendChild(message);
+    if (isLoggedIn()) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chat-list-empty__btn';
+        btn.textContent = 'Üye ara';
+        btn.addEventListener('click', () => openSearchPanel());
+        empty.appendChild(btn);
+    }
     list.appendChild(empty);
     setDmListSectionVisible(false);
 }
@@ -3931,6 +4028,7 @@ function addDmToSidebar(userId, username, preview = '', avatarUrl = null, {
 } = {}) {
     const list = document.getElementById('myActiveChatsList');
     if (document.getElementById(`user-${userId}`)) return;
+    list?.querySelector('.chat-list-empty')?.remove();
 
     const item = document.createElement('div');
     item.className = 'chat-item';
@@ -4063,8 +4161,7 @@ async function loadDmHistory() {
     const chats = otherMembers
         .map((member) => {
             if (isUserBlocked(member.user_id)) return null;
-            const lastMsg = lastMessageByConv.get(member.conversation_id);
-            if (!lastMsg) return null;
+            const lastMsg = lastMessageByConv.get(member.conversation_id) || null;
             return {
                 userId: member.user_id,
                 conversationId: member.conversation_id,
@@ -4072,25 +4169,13 @@ async function loadDmHistory() {
             };
         })
         .filter(Boolean)
-        .sort((a, b) => new Date(b.lastMsg.created_at) - new Date(a.lastMsg.created_at));
+        .sort((a, b) => {
+            const ta = a.lastMsg ? new Date(a.lastMsg.created_at).getTime() : 0;
+            const tb = b.lastMsg ? new Date(b.lastMsg.created_at).getTime() : 0;
+            return tb - ta;
+        });
 
     if (!chats.length) {
-        if (dmConvIds.length) {
-            const { data: probe, error: probeError } = await supabase
-                .from('messages')
-                .select('id')
-                .in('conversation_id', dmConvIds)
-                .is('deleted_at', null)
-                .limit(1);
-            if (probeError) {
-                console.error('[dm-list] mesaj RLS hatası:', probeError.message, probeError.code);
-            } else if (!probe?.length) {
-                console.error(
-                    '[dm-list] DM üyeliği var ama mesaj okunamıyor. '
-                    + 'Supabase\'de supabase/fix-restore-dm-access.sql dosyasını çalıştırın.'
-                );
-            }
-        }
         renderDmEmptyState();
         return null;
     }
@@ -4133,14 +4218,16 @@ async function loadDmHistory() {
         addDmToSidebar(
             chat.userId,
             username,
-            previewFromMessage({
-                body: chat.lastMsg.body,
-                contentType: chat.lastMsg.content_type || 'text',
-                isOutgoing: chat.lastMsg.sender_id === currentUserId
-            }),
+            chat.lastMsg
+                ? previewFromMessage({
+                    body: chat.lastMsg.body,
+                    contentType: chat.lastMsg.content_type || 'text',
+                    isOutgoing: chat.lastMsg.sender_id === currentUserId
+                })
+                : 'Sohbet',
             profile?.avatar_url || null,
             {
-                lastTime: chat.lastMsg.created_at,
+                lastTime: chat.lastMsg?.created_at || null,
                 append: true
             }
         );
@@ -4171,6 +4258,7 @@ async function handleLogout() {
     await supabase.auth.signOut();
     currentUserId = null;
     currentMyUsername = 'Misafir';
+    currentMyInviteCode = null;
     currentMyAvatarUrl = null;
     currentMyAvatarR2Key = null;
     dmConversations.clear();
@@ -4515,7 +4603,12 @@ async function updatePushStatusUI() {
 }
 
 async function openChatFromNotification(route) {
-    if (!route?.chatId && !route?.userId && !route?.usernameSlug) return;
+    if (!route?.chatId && !route?.userId && !route?.usernameSlug && !route?.inviteCode) return;
+
+    if (route.inviteCode) {
+        await openDmByInviteCode(route.inviteCode);
+        return;
+    }
 
     if (route.usernameSlug) {
         await openDmByUsernameSlug(route.usernameSlug);

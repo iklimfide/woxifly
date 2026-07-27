@@ -410,6 +410,38 @@
         }
 
         .chat-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+        .sidebar-member-search {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+            margin: 4px 12px 12px;
+            padding: 11px 14px;
+            width: calc(100% - 24px);
+            box-sizing: border-box;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: #f8fafc;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.15s;
+        }
+
+        .sidebar-member-search:active,
+        .sidebar-member-search:hover {
+            background: #edf2f7;
+        }
+
+        .sidebar-member-search__icon {
+            font-size: 1rem;
+            line-height: 1;
+            opacity: 0.85;
+        }
+
         .list-section-title { padding: 10px 16px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); background-color: #f7fafc; border-top: 1px solid var(--border-color); }
         .list-section-title:first-child { border-top: none; }
         
@@ -426,11 +458,30 @@
         .chat-time { font-size: 0.7rem; color: var(--text-muted); flex-shrink: 0; margin-left: 8px; }
 
         .chat-list-empty {
-            padding: 20px 16px;
+            padding: 16px 16px 8px;
             font-size: 0.82rem;
             color: var(--text-muted);
             line-height: 1.45;
             text-align: center;
+        }
+
+        .chat-list-empty__btn {
+            display: block;
+            width: 100%;
+            max-width: 220px;
+            margin: 14px auto 0;
+            padding: 10px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: #fff;
+            color: var(--accent-color);
+            font-size: 0.88rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .chat-list-empty__btn:active {
+            background: #f7fafc;
         }
 
         body.chats-home-view .app-body .main-content {
@@ -3051,10 +3102,12 @@
             background: #fff5f5;
         }
 
-        .form-group input[readonly] {
+        .form-group input[readonly],
+        .form-group input:disabled {
             background-color: #edf2f7;
             color: #718096;
-            cursor: default;
+            cursor: not-allowed;
+            opacity: 1;
         }
 
         .visibility-toggle {
@@ -4348,6 +4401,11 @@
                 <h2><a href="/" class="sidebar-brand" id="appHomeLink">Woxi<span>fly</span></a></h2>
                 <button type="button" class="sidebar-close-btn" onclick="closeSidebar()" aria-label="Menüyü kapat">×</button>
             </div>
+
+            <button type="button" class="sidebar-member-search" id="sidebarMemberSearchBtn">
+                <span class="sidebar-member-search__icon" aria-hidden="true">🔍</span>
+                <span>Üye ara</span>
+            </button>
             
             <div class="chat-list">
                 <div class="list-section-title" id="dmListSectionTitle" hidden>Sohbetler</div>
@@ -4433,10 +4491,18 @@
                         </div>
                         <input type="file" id="profileAvatarInput" hidden accept="image/jpeg,image/png,image/webp">
                     </div>
-                    <div class="form-group"><label>Rumuz</label><input type="text" id="usernameInput" value="Ben" autocomplete="nickname"></div>
-                    <div class="form-group profile-share-row">
-                        <button type="button" class="profile-share-link" id="profileShareLink" disabled>—</button>
-                        <button type="button" class="profile-share-btn" id="profileShareBtn">Paylaş</button>
+                    <div class="form-group">
+                        <label for="usernameInput">Kullanıcı adı</label>
+                        <input type="text" id="usernameInput" value="Ben" autocomplete="nickname" readonly disabled aria-readonly="true">
+                        <p class="form-hint">Kayıt sırasında belirlenir; sonradan değiştirilemez.</p>
+                    </div>
+                    <div class="form-group profile-share-block">
+                        <label>Davet linki</label>
+                        <div class="profile-share-row">
+                            <button type="button" class="profile-share-link" id="profileShareLink" disabled title="8 haneli davet kodunuz">—</button>
+                            <button type="button" class="profile-share-btn" id="profileShareBtn">Paylaş</button>
+                        </div>
+                        <p class="form-hint">Arkadaşınız linki açınca size mesaj atabilir. Kodunuz sabittir; kullanıcı adınız linkte görünmez.</p>
                     </div>
 
                     <hr class="profile-divider">
