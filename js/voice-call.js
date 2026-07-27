@@ -45,7 +45,38 @@ const ICE_GATHERING_TIMEOUT_MS = 10000;
 /** connectionState 'failed' sonrası erken kapanmayı önlemek için bekleme. */
 const ICE_FAILED_GRACE_MS = 10000;
 
+function isVoiceCallDebugEnabled() {
+    try {
+        if (localStorage.getItem('woxifly-voice-call-debug') === '1') return true;
+    } catch {
+        /* ignore */
+    }
+    const host = typeof location !== 'undefined' ? location.hostname : '';
+    return host === 'localhost' || host === '127.0.0.1';
+}
+
+function voiceCallDebugLog(...args) {
+    if (isVoiceCallDebugEnabled()) console.log(...args);
+}
+
 let pcConnectionFailedTimer = null;
+let outboundIceReleased = false;
+/** @type {{ type: string; candidate?: RTCIceCandidateInit }[]} */
+const pendingOutboundIceSignals = [];
+
+function resetOutboundIceGate() {
+    outboundIceReleased = false;
+    pendingOutboundIceSignals.length = 0;
+}
+
+function releaseOutboundIceGate() {
+    if (outboundIceReleased) return;
+    outboundIceReleased = true;
+    const queue = pendingOutboundIceSignals.splice(0);
+    for (const extra of queue) {
+        void sendSignal(extra);
+    }
+}
 
 const callSessionId = (() => {
     try {
@@ -93,8 +124,9 @@ function mapSignalTypeToLabel(type) {
 }
 
 function logCallBroadcast(direction, type, detail = {}) {
+    if (type === 'ice' && !isVoiceCallDebugEnabled()) return;
     const label = mapSignalTypeToLabel(type);
-    console.log(`[voice-call] ${direction} broadcast ${label}`, detail);
+    voiceCallDebugLog(`[voice-call] ${direction} broadcast ${label}`, detail);
 }
 
 function clearConnectionFailedTimer() {
@@ -122,7 +154,7 @@ async function flushPendingIceCandidates() {
     if (!pc || !remoteDescriptionSet || !pc.remoteDescription) return;
     const total = pendingIceCandidates.length;
     if (total > 0) {
-        console.log(`[voice-call] ice-candidate: kuyruktan ${total} aday flush ediliyor`);
+        voiceCallDebugLog(`[voice-call] ice-candidate: kuyruktan ${total} aday flush ediliyor`);
     }
     let ok = 0;
     let fail = 0;
@@ -131,7 +163,7 @@ async function flushPendingIceCandidates() {
         try {
             await pc.addIceCandidate(new RTCIceCandidate(init));
             ok += 1;
-            console.log('[voice-call] ice-candidate: addIceCandidate OK', {
+            voiceCallDebugLog('[voice-call] ice-candidate: addIceCandidate OK', {
                 n: ok,
                 sdpMid: init.sdpMid,
                 sdpMLineIndex: init.sdpMLineIndex
@@ -142,7 +174,7 @@ async function flushPendingIceCandidates() {
         }
     }
     if (total > 0) {
-        console.log('[voice-call] ice-candidate: flush bitti', { ok, fail });
+        voiceCallDebugLog('[voice-call] ice-candidate: flush bitti', { ok, fail });
     }
 }
 
@@ -159,7 +191,7 @@ async function queueOrAddIceCandidate(candidateInit) {
     }
     try {
         await pc.addIceCandidate(new RTCIceCandidate(cand));
-        console.log('[voice-call] ice-candidate: addIceCandidate (anında)', {
+        voiceCallDebugLog('[voice-call] ice-candidate: addIceCandidate (anında)', {
             sdpMid: cand.sdpMid,
             sdpMLineIndex: cand.sdpMLineIndex
         });
@@ -175,7 +207,7 @@ async function markRemoteDescriptionSet() {
         pendingIceCandidates.push(prePcIceCandidates.shift());
     }
     if (preCount > 0) {
-        console.log('[voice-call] ice-candidate: prePc kuyruğundan pending\'e taşındı', { preCount });
+        voiceCallDebugLog('[voice-call] ice-candidate: prePc kuyruğundan pending\'e taşındı', { preCount });
     }
     await flushPendingIceCandidates();
 }
@@ -441,10 +473,15 @@ function showIncomingCallNotification(fromName) {
 function bindIceCandidateHandler(connection) {
     connection.onicecandidate = (event) => {
         if (!event.candidate || !callId || !conversationId) return;
-        void sendSignal({
+        const extra = {
             type: 'ice',
             candidate: event.candidate.toJSON()
-        });
+        };
+        if (!outboundIceReleased) {
+            pendingOutboundIceSignals.push(extra);
+            return;
+        }
+        void sendSignal(extra);
     };
 }
 
@@ -584,7 +621,7 @@ async function createPeerConnection() {
 
     connection.onconnectionstatechange = () => {
         const state = connection.connectionState;
-        console.log('[voice-call] connectionState', {
+        voiceCallDebugLog('[voice-call] connectionState', {
             connectionState: state,
             iceConnectionState: connection.iceConnectionState,
             callId,
@@ -612,7 +649,7 @@ async function createPeerConnection() {
 
     connection.oniceconnectionstatechange = () => {
         const ice = connection.iceConnectionState;
-        console.log('[voice-call] iceConnectionState', {
+        voiceCallDebugLog('[voice-call] iceConnectionState', {
             iceConnectionState: ice,
             connectionState: connection.connectionState,
             iceGatheringState: connection.iceGatheringState,
@@ -668,7 +705,7 @@ async function handleOffer(connection, offerInit) {
         });
         throw new Error('Uzak teklif uygulanamadı.');
     }
-    console.log('[voice-call] call-offer: setRemoteDescription başarılı');
+    voiceCallDebugLog('[voice-call] call-offer: setRemoteDescription başarılı');
 }
 
 function attachLocalTracks(connection) {
@@ -695,7 +732,7 @@ async function sendSignal(extra) {
         conversation_id: conversationId
     });
     const sent = await broadcastCallSignal(payload);
-    console.log(`[voice-call] → broadcast ${mapSignalTypeToLabel(extra?.type)} gönderildi:`, sent);
+    voiceCallDebugLog(`[voice-call] → broadcast ${mapSignalTypeToLabel(extra?.type)} gönderildi:`, sent);
     return sent;
 }
 
@@ -741,11 +778,13 @@ function syncCallUi() {
     if (nameEl) nameEl.textContent = partner;
 
     if (status) {
-        if (phase === 'calling') status.textContent = 'Aranıyor…';
-        else if (phase === 'ringing') status.textContent = 'Bağlanıyor…';
-        else if (phase === 'connected') status.textContent = statusText;
-        else if (phase === 'incoming') status.textContent = 'Gelen sesli arama';
-        else status.textContent = '';
+        let line = '';
+        if (phase === 'calling') line = 'Aranıyor…';
+        else if (phase === 'ringing') line = isCaller ? 'Bağlanıyor…' : '';
+        else if (phase === 'connected') line = statusText;
+        else if (phase === 'incoming') line = 'Gelen sesli arama';
+        status.textContent = line;
+        status.hidden = !line;
     }
 
     if (callBtn) {
@@ -797,6 +836,7 @@ export function updateTopbarCallButtonVisibility(visible) {
 async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
     clearRingTimer();
     clearConnectionFailedTimer();
+    resetOutboundIceGate();
     stopAllCallAlertSounds();
     pendingOffer = null;
     resetIceState();
@@ -885,6 +925,7 @@ async function acceptIncoming() {
 
     try {
         await sendSignal({ type: 'call_claimed' }).catch(() => {});
+        resetOutboundIceGate();
 
         try {
             await ensureLocalAudio();
@@ -923,6 +964,7 @@ async function acceptIncoming() {
             type: 'answer',
             sdp: pc.localDescription
         });
+        releaseOutboundIceGate();
         playRemoteAudio();
     } catch (err) {
         deps?.showToast?.(err instanceof Error ? err.message : 'Arama kabul edilemedi.', { type: 'error' });
@@ -971,25 +1013,29 @@ async function handleInvite(payload) {
     pendingOffer = payload.sdp || null;
     isCaller = false;
 
-    const convId = payload.conversation_id;
-    const activeConv = deps?.getConversationId?.();
-    if (convId && activeConv !== convId && deps?.openConversationForCall) {
-        await deps.openConversationForCall({
-            conversationId: convId,
-            partnerUserId: payload.from_user_id,
-            partnerName: payload.from_name
-        });
-    }
-
+    // Önce UI + zil; sohbet açılışı arka planda (openChat mesaj geçmişi yükleyebilir).
     setPhase('incoming');
-    if (deps?.isLoggedIn?.()) {
-        void fetchIceServers({ forActiveCall: true }).catch(() => {});
-    }
     startIncomingRingtone();
     showIncomingCallNotification(partnerDisplayName);
 
     if (navigator.vibrate) {
         try { navigator.vibrate([120, 80, 120]); } catch { /* ignore */ }
+    }
+
+    if (deps?.isLoggedIn?.()) {
+        void fetchIceServers({ forActiveCall: true }).catch(() => {});
+    }
+
+    const convId = payload.conversation_id;
+    const activeConv = deps?.getConversationId?.();
+    if (convId && activeConv !== convId && deps?.openConversationForCall) {
+        void deps.openConversationForCall({
+            conversationId: convId,
+            partnerUserId: payload.from_user_id,
+            partnerName: payload.from_name
+        }).catch((err) => {
+            console.warn('[voice-call] Gelen arama: sohbet arka planda açılamadı:', err);
+        });
     }
 }
 
@@ -1008,7 +1054,7 @@ async function handleAnswer(payload) {
             });
             throw new Error('Uzak yanıt uygulanamadı.');
         }
-        console.log('[voice-call] call-answer: setRemoteDescription başarılı');
+        voiceCallDebugLog('[voice-call] call-answer: setRemoteDescription başarılı');
         await markRemoteDescriptionSet();
         setPhase('ringing');
         clearRingTimer();
@@ -1030,7 +1076,7 @@ async function handleIce(payload) {
     if (!pc) {
         if (phase === 'incoming' || phase === 'ringing' || phase === 'calling') {
             prePcIceCandidates.push(payload.candidate);
-            console.log('[voice-call] ice-candidate: PC yok, prePc kuyruğuna eklendi', {
+            voiceCallDebugLog('[voice-call] ice-candidate: PC yok, prePc kuyruğuna eklendi', {
                 prePcCount: prePcIceCandidates.length
             });
         }
@@ -1136,6 +1182,7 @@ export async function startVoiceCall() {
         setPhase('calling');
         startRingbackTone();
         primeRemoteAudioPlayback();
+        resetOutboundIceGate();
         await ensureLocalAudio();
         pc = await createPeerConnection();
         attachLocalTracks(pc);
@@ -1143,7 +1190,7 @@ export async function startVoiceCall() {
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        await waitForIceGathering(pc);
+        // Invite hemen gitsin; ek ICE adayları trickle ile (gecikme olmasın diye toplama beklenmiyor).
 
         const sent = await sendSignal({
             type: 'invite',
@@ -1154,6 +1201,8 @@ export async function startVoiceCall() {
         if (!sent) {
             throw new Error('Arama sinyali gönderilemedi.');
         }
+
+        releaseOutboundIceGate();
 
         ringTimer = window.setTimeout(() => {
             if (phase !== 'calling') return;
