@@ -31,7 +31,14 @@ function sessionNeedsRefresh(session, { forceRefresh = false } = {}) {
 /** Vercel API route'ları için güncel access token (süresi dolmuşsa yeniler). */
 export async function getAccessTokenForApi({ forceRefresh = false } = {}) {
     let session = await getSession();
-    if (!session?.access_token) return null;
+
+    if (!session?.access_token) {
+        const { data, error } = await supabase.auth.refreshSession();
+        if (!error && data.session?.access_token) {
+            return data.session.access_token;
+        }
+        return null;
+    }
 
     if (!sessionNeedsRefresh(session, { forceRefresh })) {
         return session.access_token;
@@ -64,6 +71,9 @@ export async function fetchWithAuth(input, init = {}) {
     };
 
     let token = await getAccessTokenForApi();
+    if (!token) {
+        token = await getAccessTokenForApi({ forceRefresh: true });
+    }
     if (!token) {
         throw new Error('Oturum gerekli.');
     }

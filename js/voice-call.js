@@ -415,8 +415,9 @@ async function fetchIceServers() {
     let res;
     try {
         res = await fetchWithAuth('/api/turn-credentials');
-    } catch {
-        throw new Error('Oturum gerekli.');
+    } catch (err) {
+        console.warn('[voice-call] turn-credentials atlanıyor (STUN):', err);
+        return DEFAULT_ICE_SERVERS;
     }
 
     const text = await res.text();

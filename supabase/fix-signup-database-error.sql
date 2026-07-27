@@ -81,13 +81,13 @@ declare
   v_district text;
   v_username text;
 begin
-  v_district := coalesce(nullif(trim(new.raw_user_meta_data->>'district'), ''), 'İstanbul Anadolu');
+  v_district := coalesce(nullif(trim(new.raw_user_meta_data->>'district'), ''), 'Belirsiz');
   v_username := coalesce(nullif(trim(new.raw_user_meta_data->>'username'), ''), 'Kullanıcı');
 
   if not exists (
     select 1 from public.district_coordinates dc where dc.district = v_district
   ) then
-    v_district := 'Kadıköy';
+    v_district := 'Belirsiz';
   end if;
 
   insert into public.profiles (id, username, district, current_district, is_visible)

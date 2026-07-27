@@ -297,17 +297,15 @@ async function handleRegisterSubmit(event) {
         }
 
         const email = resolveAuthLoginEmail(username);
+        const signUpMeta = { username, district: DEFAULT_LOCATION };
+        if (coords) {
+            signUpMeta.lat = coords.lat;
+            signUpMeta.lon = coords.lon;
+        }
         const { data, error } = await supabase.auth.signUp({
             email,
             password,
-            options: {
-                data: {
-                    username,
-                    district: DEFAULT_LOCATION,
-                    lat: coords.lat,
-                    lon: coords.lon
-                }
-            }
+            options: { data: signUpMeta }
         });
 
         if (error) {

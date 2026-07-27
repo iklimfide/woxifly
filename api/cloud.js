@@ -240,11 +240,15 @@ async function loadEmailsForUserIds(client, userIds) {
 }
 
 function memberLocation(profile) {
+    const home = (profile.home_location || '').trim();
+    if (home) return home;
+
     const district = profile.current_district || profile.district || '';
     if (district === 'Yurtdışı' && profile.abroad_city) {
         return `Yurtdışı · ${profile.abroad_city}`;
     }
-    return district || '—';
+    if (!district || district === 'Belirsiz') return 'Belirsiz';
+    return district;
 }
 
 async function handleMembers(client, query, res) {
@@ -254,7 +258,7 @@ async function handleMembers(client, query, res) {
 
     let profileQuery = client
         .from('profiles')
-        .select('id, username, district, current_district, abroad_city, created_at, avatar_url, avatar_r2_key', { count: 'exact' })
+        .select('id, username, district, current_district, abroad_city, home_location, created_at, avatar_url, avatar_r2_key', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
 

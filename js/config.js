@@ -16,12 +16,13 @@ export {
     R2_PUBLIC_BASE_URL
 };
 
-/** Profil kaydı için varsayılan konum (UI'da gösterilmez). */
-export const DEFAULT_LOCATION = 'İstanbul Anadolu';
+/** Kayıtta konum seçilmediyse grup/radar için kullanılan sistem ilçesi. */
+export const DEFAULT_LOCATION = 'Belirsiz';
 
 const DEFAULT_COORDS = { lat: 40.981857142857145, lon: 29.186857142857146 };
 
 export function getLocationCoords() {
+    if (DEFAULT_LOCATION === 'Belirsiz') return null;
     return DEFAULT_COORDS;
 }
 

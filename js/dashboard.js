@@ -652,7 +652,12 @@ function renderMemberProfile(profile) {
     );
 
     const hasAbout = setMemberProfileField('memberProfileAboutWrap', 'memberProfileAbout', profile.about_me);
-    const hasLocation = setMemberProfileField('memberProfileLocationWrap', 'memberProfileLocation', profile.home_location);
+    const homeLocation = (profile.home_location || '').trim();
+    const hasLocation = setMemberProfileField(
+        'memberProfileLocationWrap',
+        'memberProfileLocation',
+        homeLocation || 'Belirsiz'
+    );
     const hasJob = setMemberProfileField('memberProfileJobWrap', 'memberProfileJob', profile.job);
     const hasMarital = setMemberProfileField('memberProfileMaritalWrap', 'memberProfileMarital', profile.marital_status);
 
