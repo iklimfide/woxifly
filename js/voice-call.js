@@ -41,9 +41,9 @@ let cachedIceServers = null;
 let cachedIceServersAt = 0;
 const ICE_SERVERS_CACHE_MS = 5 * 60 * 1000;
 /** ICE aday toplama (invite/answer gönderimi öncesi). */
-const ICE_GATHERING_TIMEOUT_MS = 10000;
-/** connectionState 'failed' sonrası erken kapanmayı önlemek için bekleme. */
-const ICE_FAILED_GRACE_MS = 10000;
+const ICE_GATHERING_TIMEOUT_MS = 12000;
+/** connectionState 'failed' sonrası erken kapanmayı önlemek için bekleme (TURN relay). */
+const ICE_FAILED_GRACE_MS = 12000;
 
 function isVoiceCallDebugEnabled() {
     try {
@@ -57,6 +57,57 @@ function isVoiceCallDebugEnabled() {
 
 function voiceCallDebugLog(...args) {
     if (isVoiceCallDebugEnabled()) console.log(...args);
+}
+
+function logSignalingFlow(role, step, detail = {}) {
+    console.log(`[voice-call][signaling][${role}] ${step}`, detail);
+}
+
+function describeIceCandidateInit(candidateInit) {
+    const line = typeof candidateInit === 'string'
+        ? candidateInit
+        : (candidateInit?.candidate || '');
+    let kind = 'unknown';
+    if (/ typ relay /i.test(line)) kind = 'relay';
+    else if (/ typ srflx /i.test(line)) kind = 'srflx';
+    else if (/ typ host /i.test(line)) kind = 'host';
+    return {
+        kind,
+        sdpMid: candidateInit?.sdpMid,
+        sdpMLineIndex: candidateInit?.sdpMLineIndex,
+        preview: line ? line.slice(0, 96) : ''
+    };
+}
+
+function logIceSignaling(role, step, candidateInit, extra = {}) {
+    const desc = describeIceCandidateInit(candidateInit);
+    if (desc.kind !== 'relay' && !isVoiceCallDebugEnabled()) return;
+    logSignalingFlow(role, step, { ...desc, ...extra });
+}
+
+function auditIceServers(servers) {
+    const summary = {
+        serverCount: servers.length,
+        turnUrlCount: 0,
+        stunUrlCount: 0,
+        turnWithCredentials: 0,
+        turnMissingCredentials: 0
+    };
+    for (const entry of servers) {
+        const urls = Array.isArray(entry.urls) ? entry.urls : [entry.urls].filter(Boolean);
+        let entryHasTurn = false;
+        for (const raw of urls) {
+            const u = String(raw).toLowerCase();
+            if (u.startsWith('turn:') || u.startsWith('turns:')) summary.turnUrlCount += 1;
+            if (u.startsWith('stun:')) summary.stunUrlCount += 1;
+            if (u.startsWith('turn:') || u.startsWith('turns:')) entryHasTurn = true;
+        }
+        if (entryHasTurn) {
+            if (entry.username && entry.credential) summary.turnWithCredentials += 1;
+            else summary.turnMissingCredentials += 1;
+        }
+    }
+    return summary;
 }
 
 let pcConnectionFailedTimer = null;
@@ -94,11 +145,30 @@ const callSessionId = (() => {
 
 /** Karşı tarafın ICE adayları (PC oluşmadan / remote SDP gelmeden). */
 const prePcIceCandidates = [];
+/** Invite gelmeden önce gelen ICE (call_id ile). */
+const preInviteIceByCallId = new Map();
 
 function resetIceState() {
     remoteDescriptionSet = false;
     pendingIceCandidates.length = 0;
     prePcIceCandidates.length = 0;
+}
+
+function stashPreInviteIce(callIdKey, candidate) {
+    if (!callIdKey || !candidate) return;
+    let list = preInviteIceByCallId.get(callIdKey);
+    if (!list) {
+        list = [];
+        preInviteIceByCallId.set(callIdKey, list);
+    }
+    list.push(candidate);
+}
+
+function takePreInviteIce(callIdKey) {
+    const list = preInviteIceByCallId.get(callIdKey);
+    if (!list?.length) return;
+    preInviteIceByCallId.delete(callIdKey);
+    prePcIceCandidates.push(...list);
 }
 
 function toSessionDescription(sdp) {
@@ -175,6 +245,7 @@ async function flushPendingIceCandidates() {
     }
     if (total > 0) {
         voiceCallDebugLog('[voice-call] ice-candidate: flush bitti', { ok, fail });
+        logSignalingFlow(isCaller ? 'caller' : 'callee', 'ICE kuyruk flush bitti', { ok, fail, total });
     }
 }
 
@@ -187,28 +258,34 @@ async function queueOrAddIceCandidate(candidateInit) {
     if (!cand.candidate && !cand.sdpMid && cand.sdpMLineIndex == null) return;
     if (!remoteDescriptionSet || !pc.remoteDescription) {
         pendingIceCandidates.push(cand);
+        logIceSignaling(isCaller ? 'caller' : 'callee', 'ICE kuyruğa alındı (remote SDP henüz yok)', cand, {
+            queueLength: pendingIceCandidates.length
+        });
         return;
     }
     try {
         await pc.addIceCandidate(new RTCIceCandidate(cand));
-        voiceCallDebugLog('[voice-call] ice-candidate: addIceCandidate (anında)', {
-            sdpMid: cand.sdpMid,
-            sdpMLineIndex: cand.sdpMLineIndex
-        });
+        logIceSignaling(isCaller ? 'caller' : 'callee', 'addIceCandidate uygulandı', cand);
     } catch (err) {
         console.warn('[voice-call] ice-candidate: addIceCandidate (anında) hata', err, cand);
     }
 }
 
 async function markRemoteDescriptionSet() {
+    const role = isCaller ? 'caller' : 'callee';
     remoteDescriptionSet = true;
     const preCount = prePcIceCandidates.length;
     while (prePcIceCandidates.length) {
         pendingIceCandidates.push(prePcIceCandidates.shift());
     }
+    const pendingTotal = pendingIceCandidates.length;
     if (preCount > 0) {
         voiceCallDebugLog('[voice-call] ice-candidate: prePc kuyruğundan pending\'e taşındı', { preCount });
     }
+    logSignalingFlow(role, 'setRemoteDescription tamam — bekleyen ICE flush', {
+        prePcMerged: preCount,
+        pendingQueue: pendingTotal
+    });
     await flushPendingIceCandidates();
 }
 
@@ -597,14 +674,29 @@ async function fetchIceServers({ forActiveCall = false } = {}) {
     }
 
     const servers = data.iceServers?.length ? data.iceServers : DEFAULT_ICE_SERVERS;
+    const audit = auditIceServers(servers);
+    if (forActiveCall) {
+        logSignalingFlow('peer', 'iceServers yüklendi (iceTransportPolicy: all — varsayılan)', audit);
+        if (audit.turnMissingCredentials > 0 || audit.turnUrlCount === 0) {
+            console.warn('[voice-call] TURN eksik veya kimlik bilgisi yok:', audit);
+        }
+    }
     cachedIceServers = servers;
     cachedIceServersAt = Date.now();
+    if (forActiveCall && data.turnConfigured !== true) {
+        deps?.showToast?.(
+            'Ses köprüsü (TURN) yok; farklı ağlarda bağlantı kurulamayabilir. Vercel Cloudflare TURN anahtarlarını kontrol edin.',
+            { type: 'warning' }
+        );
+    }
     return servers;
 }
 
 async function createPeerConnection() {
     resetIceState();
     const iceServers = await fetchIceServers({ forActiveCall: true });
+    let iceRestartAttempted = false;
+    // iceTransportPolicy belirtilmez → tarayıcı varsayılanı 'all' (host/srflx/relay).
     const connection = new RTCPeerConnection({
         iceServers,
         bundlePolicy: 'max-bundle',
@@ -662,9 +754,21 @@ async function createPeerConnection() {
                 iceConnectionState: ice,
                 connectionState: connection.connectionState
             });
+            if (ice === 'failed' && !iceRestartAttempted && typeof connection.restartIce === 'function') {
+                iceRestartAttempted = true;
+                voiceCallDebugLog('[voice-call] restartIce deneniyor');
+                try {
+                    connection.restartIce();
+                } catch (err) {
+                    console.warn('[voice-call] restartIce başarısız:', err);
+                }
+            }
         }
         if (ice === 'connected' || ice === 'completed') {
             clearConnectionFailedTimer();
+            if (phase === 'ringing' || phase === 'calling') {
+                setPhase('connected');
+            }
             void playRemoteAudio();
         }
     };
@@ -731,7 +835,22 @@ async function sendSignal(extra) {
         call_id: callId,
         conversation_id: conversationId
     });
+    if (extra?.type === 'answer') {
+        logSignalingFlow(isCaller ? 'caller' : 'callee', '→ Supabase broadcast call-answer gönderiliyor', {
+            call_id: callId,
+            sdpType: extra.sdp?.type,
+            sdpBytes: extra.sdp?.sdp?.length ?? 0
+        });
+    }
+    if (extra?.type === 'ice' && extra.candidate) {
+        logIceSignaling(isCaller ? 'caller' : 'callee', '→ Supabase broadcast ice-candidate', extra.candidate, {
+            call_id: callId
+        });
+    }
     const sent = await broadcastCallSignal(payload);
+    if (extra?.type === 'answer') {
+        logSignalingFlow(isCaller ? 'caller' : 'callee', '→ Supabase broadcast call-answer sonucu', { delivered: sent });
+    }
     voiceCallDebugLog(`[voice-call] → broadcast ${mapSignalTypeToLabel(extra?.type)} gönderildi:`, sent);
     return sent;
 }
@@ -780,7 +899,7 @@ function syncCallUi() {
     if (status) {
         let line = '';
         if (phase === 'calling') line = 'Aranıyor…';
-        else if (phase === 'ringing') line = isCaller ? 'Bağlanıyor…' : '';
+        else if (phase === 'ringing') line = isCaller ? 'Görüşme kuruluyor…' : '';
         else if (phase === 'connected') line = statusText;
         else if (phase === 'incoming') line = 'Gelen sesli arama';
         status.textContent = line;
@@ -837,6 +956,7 @@ async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
     clearRingTimer();
     clearConnectionFailedTimer();
     resetOutboundIceGate();
+    preInviteIceByCallId.clear();
     stopAllCallAlertSounds();
     pendingOffer = null;
     resetIceState();
@@ -959,10 +1079,16 @@ async function acceptIncoming() {
         pendingOffer = null;
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        await waitForIceGathering(pc);
-        await sendSignal({
+        logSignalingFlow('callee', 'call-answer SDP oluşturuldu (setLocalDescription)', {
+            type: pc.localDescription?.type,
+            sdpBytes: pc.localDescription?.sdp?.length ?? 0
+        });
+        const answerSent = await sendSignal({
             type: 'answer',
             sdp: pc.localDescription
+        });
+        logSignalingFlow('callee', 'Kabul Et: call-answer + ICE trickle yayını başlatıldı', {
+            broadcastDelivered: answerSent
         });
         releaseOutboundIceGate();
         playRemoteAudio();
@@ -1012,6 +1138,7 @@ async function handleInvite(payload) {
     partnerDisplayName = payload.from_name || partnerDisplayName;
     pendingOffer = payload.sdp || null;
     isCaller = false;
+    takePreInviteIce(callId);
 
     // Önce UI + zil; sohbet açılışı arka planda (openChat mesaj geçmişi yükleyebilir).
     setPhase('incoming');
@@ -1046,6 +1173,11 @@ async function handleAnswer(payload) {
     try {
         const answerSdp = toSessionDescription(payload.sdp);
         if (!answerSdp) throw new Error('Geçersiz yanıt');
+        logSignalingFlow('caller', '← Supabase call-answer alındı', {
+            call_id: payload.call_id,
+            sdpType: answerSdp.type,
+            sdpBytes: answerSdp.sdp?.length ?? 0
+        });
         logCallBroadcast('←', 'answer', { call_id: payload.call_id, action: 'setRemoteDescription başlıyor' });
         await pc.setRemoteDescription(answerSdp);
         if (!pc.remoteDescription || pc.remoteDescription.type !== 'answer') {
@@ -1054,6 +1186,7 @@ async function handleAnswer(payload) {
             });
             throw new Error('Uzak yanıt uygulanamadı.');
         }
+        logSignalingFlow('caller', 'setRemoteDescription(call-answer) başarılı');
         voiceCallDebugLog('[voice-call] call-answer: setRemoteDescription başarılı');
         await markRemoteDescriptionSet();
         setPhase('ringing');
@@ -1068,15 +1201,21 @@ async function handleAnswer(payload) {
 
 async function handleIce(payload) {
     if (payload.call_id !== callId || !payload.candidate) return;
+    const role = isCaller ? 'caller' : 'callee';
+    logIceSignaling(role, '← Supabase ice-candidate alındı', payload.candidate, {
+        call_id: payload.call_id,
+        hasPc: Boolean(pc),
+        remoteDescriptionSet
+    });
     logCallBroadcast('←', 'ice', {
         call_id: payload.call_id,
-        buffered: !pc,
+        buffered: !pc || !remoteDescriptionSet,
         phase
     });
     if (!pc) {
         if (phase === 'incoming' || phase === 'ringing' || phase === 'calling') {
             prePcIceCandidates.push(payload.candidate);
-            voiceCallDebugLog('[voice-call] ice-candidate: PC yok, prePc kuyruğuna eklendi', {
+            logIceSignaling(role, 'ICE prePc kuyruğuna alındı (PC yok)', payload.candidate, {
                 prePcCount: prePcIceCandidates.length
             });
         }
@@ -1126,6 +1265,11 @@ export async function handleVoiceCallSignal(payload) {
             await handleAnswer(payload);
             break;
         case 'ice':
+            if (phase === 'idle' && payload.call_id && payload.candidate) {
+                stashPreInviteIce(payload.call_id, payload.candidate);
+                voiceCallDebugLog('[voice-call] ice-candidate: invite öncesi saklandı', payload.call_id);
+                break;
+            }
             await handleIce(payload);
             break;
         case 'decline':
