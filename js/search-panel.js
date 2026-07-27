@@ -3,6 +3,7 @@ import { getMessageRetentionCutoffIso } from './config.js';
 import { formatDisplayUsername } from './utils.js';
 import { closeTopbarMenus } from './topbar.js';
 import { PROFILE_DIRECTORY } from './profile-directory.js';
+import { displayMediaUrl, resolveAvatarMediaUrl } from './media/urls.js';
 
 let deps = null;
 let debounceTimer = null;
