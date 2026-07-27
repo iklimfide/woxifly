@@ -4317,7 +4317,8 @@ async function initDashboard() {
             isPartnerBlocked: (userId) => isUserBlocked(userId),
             openConversationForCall,
             showToast,
-            recordCallLog: (args) => dispatchCallLogMessage(args)
+            recordCallLog: (args) => dispatchCallLogMessage(args),
+            isIncomingCallNotifyEnabled: () => Notification.permission === 'granted'
         });
     });
     document.getElementById('appHomeLink')?.addEventListener('click', (event) => {

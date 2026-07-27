@@ -26,6 +26,34 @@ let callLogRecorded = false;
 let remoteDescriptionSet = false;
 /** @type {RTCIceCandidateInit[]} */
 const pendingIceCandidates = [];
+/** @type {AudioContext|null} */
+let sharedCallAudioContext = null;
+/** @type {number|null} */
+let ringbackIntervalId = null;
+/** @type {number|null} */
+let incomingRingIntervalId = null;
+/** @type {Notification|null} */
+let incomingCallNotification = null;
+let callAudioUnlockBound = false;
+/** @type {MediaStreamAudioSourceNode|null} */
+let remoteWebAudioSource = null;
+let cachedIceServers = null;
+let cachedIceServersAt = 0;
+const ICE_SERVERS_CACHE_MS = 5 * 60 * 1000;
+
+const callSessionId = (() => {
+    try {
+        const key = 'woxifly-call-session-id';
+        let id = sessionStorage.getItem(key);
+        if (!id) {
+            id = crypto.randomUUID();
+            sessionStorage.setItem(key, id);
+        }
+        return id;
+    } catch {
+        return crypto.randomUUID();
+    }
+})();
 
 function resetIceState() {
     remoteDescriptionSet = false;
@@ -55,12 +83,17 @@ async function flushPendingIceCandidates() {
 
 async function queueOrAddIceCandidate(candidateInit) {
     if (!pc || !candidateInit) return;
+    const cand =
+        typeof candidateInit === 'string'
+            ? { candidate: candidateInit }
+            : candidateInit;
+    if (!cand.candidate && !cand.sdpMid && cand.sdpMLineIndex == null) return;
     if (!remoteDescriptionSet || !pc.remoteDescription) {
-        pendingIceCandidates.push(candidateInit);
+        pendingIceCandidates.push(cand);
         return;
     }
     try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidateInit));
+        await pc.addIceCandidate(new RTCIceCandidate(cand));
     } catch {
         /* ignore stale */
     }
@@ -71,21 +104,253 @@ async function markRemoteDescriptionSet() {
     await flushPendingIceCandidates();
 }
 
-async function playRemoteAudio() {
+function primeRemoteAudioPlayback() {
+    if (!remoteAudioEl) return;
+    remoteAudioEl.autoplay = true;
+    remoteAudioEl.playsInline = true;
+    remoteAudioEl.setAttribute('playsinline', '');
+    remoteAudioEl.setAttribute('webkit-playsinline', '');
+    remoteAudioEl.muted = true;
+    void remoteAudioEl.play()
+        .then(() => {
+            remoteAudioEl.pause();
+            remoteAudioEl.currentTime = 0;
+            remoteAudioEl.muted = false;
+        })
+        .catch(() => {
+            remoteAudioEl.muted = false;
+        });
+    getSharedCallAudioContext();
+}
+
+function disconnectRemoteWebAudioRoute() {
+    if (remoteWebAudioSource) {
+        try {
+            remoteWebAudioSource.disconnect();
+        } catch {
+            /* ignore */
+        }
+        remoteWebAudioSource = null;
+    }
+}
+
+function routeRemoteViaWebAudio(stream) {
+    const ctx = getSharedCallAudioContext();
+    if (!ctx || !stream) return false;
+    try {
+        disconnectRemoteWebAudioRoute();
+        remoteWebAudioSource = ctx.createMediaStreamSource(stream);
+        const gain = ctx.createGain();
+        gain.gain.value = 1;
+        remoteWebAudioSource.connect(gain);
+        gain.connect(ctx.destination);
+        void ctx.resume();
+        return true;
+    } catch (err) {
+        console.warn('[voice-call] Web Audio yönlendirmesi başarısız:', err);
+        return false;
+    }
+}
+
+function playRemoteAudio() {
     if (!remoteAudioEl?.srcObject) return;
     remoteAudioEl.volume = 1;
     remoteAudioEl.muted = false;
-    try {
-        await remoteAudioEl.play();
-    } catch (err) {
-        console.warn('[voice-call] Uzak ses oynatılamadı:', err);
-    }
+    remoteAudioEl.autoplay = true;
+    remoteAudioEl.playsInline = true;
+    void remoteAudioEl.play().catch((err) => {
+        console.warn('[voice-call] Uzak ses (audio) oynatılamadı:', err);
+        if (remoteAudioEl.srcObject) {
+            const stream = remoteAudioEl.srcObject;
+            remoteAudioEl.srcObject = null;
+            routeRemoteViaWebAudio(stream);
+        }
+    });
 }
 
 function attachRemoteStream(stream) {
     if (!stream || !remoteAudioEl) return;
     remoteAudioEl.srcObject = stream;
-    void playRemoteAudio();
+    stopAllCallAlertSounds();
+    playRemoteAudio();
+}
+
+function getSharedCallAudioContext() {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!sharedCallAudioContext || sharedCallAudioContext.state === 'closed') {
+        sharedCallAudioContext = new AudioCtx();
+    }
+    if (sharedCallAudioContext.state === 'suspended') {
+        void sharedCallAudioContext.resume();
+    }
+    return sharedCallAudioContext;
+}
+
+function bindCallAudioUnlock() {
+    if (callAudioUnlockBound) return;
+    callAudioUnlockBound = true;
+    const unlock = () => {
+        getSharedCallAudioContext();
+    };
+    document.addEventListener('pointerdown', unlock, { passive: true });
+    document.addEventListener('touchstart', unlock, { passive: true });
+    document.addEventListener('keydown', unlock, { passive: true });
+}
+
+function stopRingbackTone() {
+    if (ringbackIntervalId != null) {
+        window.clearInterval(ringbackIntervalId);
+        ringbackIntervalId = null;
+    }
+}
+
+function stopIncomingRingtone() {
+    if (incomingRingIntervalId != null) {
+        window.clearInterval(incomingRingIntervalId);
+        incomingRingIntervalId = null;
+    }
+}
+
+function closeIncomingCallNotification() {
+    try {
+        incomingCallNotification?.close();
+    } catch {
+        /* ignore */
+    }
+    incomingCallNotification = null;
+}
+
+function stopAllCallAlertSounds() {
+    stopRingbackTone();
+    stopIncomingRingtone();
+    closeIncomingCallNotification();
+}
+
+function playDualToneBurst(ctx, masterGain, t0, freqA, freqB, duration) {
+    const tone = (freq, start, len) => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        g.gain.setValueAtTime(0, t0 + start);
+        g.gain.linearRampToValueAtTime(1, t0 + start + 0.02);
+        g.gain.setValueAtTime(1, t0 + start + len - 0.02);
+        g.gain.linearRampToValueAtTime(0, t0 + start + len);
+        osc.connect(g);
+        g.connect(masterGain);
+        osc.start(t0 + start);
+        osc.stop(t0 + start + len + 0.01);
+    };
+    tone(freqA, 0, duration);
+    tone(freqB, 0, duration);
+}
+
+function startRingbackTone() {
+    if (!isCaller || phase === 'connected') return;
+    stopRingbackTone();
+    const ctx = getSharedCallAudioContext();
+    if (!ctx) return;
+
+    try {
+        const masterGain = ctx.createGain();
+        masterGain.gain.value = 0.06;
+        masterGain.connect(ctx.destination);
+
+        const playRingbackBurst = () => {
+            if (!sharedCallAudioContext || sharedCallAudioContext.state === 'closed') return;
+            void sharedCallAudioContext.resume();
+            playDualToneBurst(sharedCallAudioContext, masterGain, sharedCallAudioContext.currentTime, 440, 480, 0.9);
+        };
+
+        playRingbackBurst();
+        ringbackIntervalId = window.setInterval(playRingbackBurst, 2800);
+    } catch (err) {
+        console.warn('[voice-call] Arama sesi başlatılamadı:', err);
+        stopRingbackTone();
+    }
+}
+
+function startIncomingRingtone() {
+    if (isCaller || phase !== 'incoming') return;
+    stopIncomingRingtone();
+    const ctx = getSharedCallAudioContext();
+    if (!ctx) return;
+
+    try {
+        const masterGain = ctx.createGain();
+        masterGain.gain.value = 0.12;
+        masterGain.connect(ctx.destination);
+
+        let ringStep = 0;
+        const playIncomingBurst = () => {
+            if (!sharedCallAudioContext || sharedCallAudioContext.state === 'closed') return;
+            if (phase !== 'incoming') return;
+            void sharedCallAudioContext.resume();
+            const t0 = sharedCallAudioContext.currentTime;
+            if (ringStep % 2 === 0) {
+                playDualToneBurst(sharedCallAudioContext, masterGain, t0, 440, 480, 0.45);
+            } else {
+                playDualToneBurst(sharedCallAudioContext, masterGain, t0, 520, 580, 0.45);
+            }
+            ringStep += 1;
+        };
+
+        playIncomingBurst();
+        incomingRingIntervalId = window.setInterval(playIncomingBurst, 1200);
+    } catch (err) {
+        console.warn('[voice-call] Gelen arama sesi başlatılamadı:', err);
+        stopIncomingRingtone();
+    }
+}
+
+function canShowIncomingCallNotification() {
+    if (typeof deps?.isIncomingCallNotifyEnabled === 'function') {
+        return deps.isIncomingCallNotifyEnabled();
+    }
+    return typeof Notification !== 'undefined' && Notification.permission === 'granted';
+}
+
+function showIncomingCallNotification(fromName) {
+    if (!canShowIncomingCallNotification()) return;
+    if (!callId) return;
+
+    const label = partnerLabel(fromName);
+    const viewingIncomingChat =
+        !document.hidden
+        && document.hasFocus()
+        && deps?.getConversationId?.() === conversationId
+        && phase === 'incoming';
+
+    try {
+        closeIncomingCallNotification();
+        if (viewingIncomingChat) return;
+
+        incomingCallNotification = new Notification('Sesli arama', {
+            body: `${label} sizi arıyor`,
+            icon: '/icons/icon-192.png',
+            tag: `woxifly-call-${callId}`,
+            renotify: true,
+            requireInteraction: true,
+            silent: false
+        });
+        incomingCallNotification.onclick = () => {
+            window.focus();
+            closeIncomingCallNotification();
+        };
+    } catch {
+        /* ignore */
+    }
+}
+
+function bindIceCandidateHandler(connection) {
+    connection.onicecandidate = (event) => {
+        if (!event.candidate || !callId || !conversationId) return;
+        void sendSignal({
+            type: 'ice',
+            candidate: event.candidate.toJSON()
+        });
+    };
 }
 
 function el(id) {
@@ -95,6 +360,14 @@ function el(id) {
 function setPhase(next) {
     if (next === 'connected' && phase !== 'connected') {
         connectedAt = Date.now();
+        stopAllCallAlertSounds();
+    }
+    if (next !== 'incoming' && phase === 'incoming') {
+        stopIncomingRingtone();
+        closeIncomingCallNotification();
+    }
+    if (next !== 'calling' && phase === 'calling') {
+        stopRingbackTone();
     }
     phase = next;
     syncCallUi();
@@ -134,6 +407,11 @@ function parseJsonResponse(text) {
 }
 
 async function fetchIceServers() {
+    const now = Date.now();
+    if (cachedIceServers && now - cachedIceServersAt < ICE_SERVERS_CACHE_MS) {
+        return cachedIceServers;
+    }
+
     let res;
     try {
         res = await fetchWithAuth('/api/turn-credentials');
@@ -173,29 +451,27 @@ async function fetchIceServers() {
         return DEFAULT_ICE_SERVERS;
     }
 
-    return data.iceServers?.length ? data.iceServers : DEFAULT_ICE_SERVERS;
+    const servers = data.iceServers?.length ? data.iceServers : DEFAULT_ICE_SERVERS;
+    cachedIceServers = servers;
+    cachedIceServersAt = Date.now();
+    return servers;
 }
 
 async function createPeerConnection() {
     resetIceState();
     const iceServers = await fetchIceServers();
-    const connection = new RTCPeerConnection({ iceServers });
-
-    connection.onicecandidate = (event) => {
-        if (!event.candidate || !callId || !conversationId) return;
-        void sendSignal({
-            type: 'ice',
-            candidate: event.candidate.toJSON()
-        });
-    };
+    const connection = new RTCPeerConnection({
+        iceServers,
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require'
+    });
 
     connection.ontrack = (event) => {
-        let stream = event.streams?.[0];
-        if (!stream && event.track) {
-            stream = new MediaStream([event.track]);
+        const stream = event.streams?.[0] ?? (event.track ? new MediaStream([event.track]) : null);
+        if (stream) attachRemoteStream(stream);
+        if (event.track) {
+            event.track.onunmute = () => playRemoteAudio();
         }
-        attachRemoteStream(stream);
-        event.track.onunmute = () => void playRemoteAudio();
     };
 
     connection.onconnectionstatechange = () => {
@@ -235,31 +511,14 @@ async function ensureLocalAudio() {
     return localStream;
 }
 
-function ensureAudioTransceiver(connection) {
-    const hasAudio = connection.getSenders().some((s) => s.track?.kind === 'audio');
-    if (!hasAudio) {
-        connection.addTransceiver('audio', { direction: 'sendrecv' });
-    }
-}
-
 function attachLocalTracks(connection) {
     if (!localStream) return;
-    const track = localStream.getAudioTracks()[0];
-    if (!track) return;
-
-    const senderWithTrack = connection.getSenders().find((s) => s.track?.kind === 'audio');
-    if (senderWithTrack) {
-        void senderWithTrack.replaceTrack(track);
-        return;
+    for (const track of localStream.getTracks()) {
+        const already = connection.getSenders().some((s) => s.track?.id === track.id);
+        if (!already) {
+            connection.addTrack(track, localStream);
+        }
     }
-
-    const emptySender = connection.getSenders().find((s) => !s.track);
-    if (emptySender) {
-        void emptySender.replaceTrack(track);
-        return;
-    }
-
-    connection.addTrack(track, localStream);
 }
 
 async function sendSignal(extra) {
@@ -268,6 +527,7 @@ async function sendSignal(extra) {
         call_id: callId,
         conversation_id: conversationId,
         from_user_id: deps.getUserId(),
+        session_id: callSessionId,
         ...extra
     };
     return broadcastCallSignal(payload);
@@ -370,6 +630,7 @@ export function updateTopbarCallButtonVisibility(visible) {
 
 async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
     clearRingTimer();
+    stopAllCallAlertSounds();
     pendingOffer = null;
     resetIceState();
 
@@ -399,8 +660,10 @@ async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
     }
 
     if (remoteAudioEl) {
+        remoteAudioEl.pause();
         remoteAudioEl.srcObject = null;
     }
+    disconnectRemoteWebAudioRoute();
 
     callId = null;
     isCaller = false;
@@ -408,7 +671,7 @@ async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
     connectedAt = null;
     setPhase('idle');
 
-    if (!callLogRecorded && endConversationId && deps?.recordCallLog) {
+    if (!callLogRecorded && endConversationId && deps?.recordCallLog && notifyRemote) {
         if (endConnectedAt && endUserId) {
             const durationSec = Math.max(1, Math.round((Date.now() - endConnectedAt) / 1000));
             callLogRecorded = true;
@@ -418,7 +681,7 @@ async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
                 initiatorId: endIsCaller ? endUserId : endPartnerUserId,
                 durationSec
             });
-        } else if (endIsCaller && endPhase === 'calling' && notifyRemote && endUserId) {
+        } else if (endIsCaller && endPhase === 'calling' && endUserId) {
             callLogRecorded = true;
             void deps.recordCallLog({
                 conversationId: endConversationId,
@@ -449,16 +712,21 @@ function rejectIncoming() {
 
 async function acceptIncoming() {
     if (phase !== 'incoming' || !pendingOffer) return;
+    stopIncomingRingtone();
+    closeIncomingCallNotification();
+    primeRemoteAudioPlayback();
 
     try {
+        await sendSignal({ type: 'call_claimed' }).catch(() => {});
+        await ensureLocalAudio();
         setPhase('ringing');
         pc = await createPeerConnection();
-        await ensureLocalAudio();
+        attachLocalTracks(pc);
+        bindIceCandidateHandler(pc);
         const offerSdp = toSessionDescription(pendingOffer);
         if (!offerSdp) throw new Error('Geçersiz arama teklifi.');
         await pc.setRemoteDescription(offerSdp);
         await markRemoteDescriptionSet();
-        attachLocalTracks(pc);
         pendingOffer = null;
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -466,7 +734,7 @@ async function acceptIncoming() {
             type: 'answer',
             sdp: pc.localDescription
         });
-        void playRemoteAudio();
+        playRemoteAudio();
     } catch (err) {
         deps?.showToast?.(err instanceof Error ? err.message : 'Arama kabul edilemedi.', { type: 'error' });
         await sendSignal({ type: 'decline' }).catch(() => {});
@@ -525,6 +793,9 @@ async function handleInvite(payload) {
     }
 
     setPhase('incoming');
+    void fetchIceServers().catch(() => {});
+    startIncomingRingtone();
+    showIncomingCallNotification(partnerDisplayName);
 
     if (navigator.vibrate) {
         try { navigator.vibrate([120, 80, 120]); } catch { /* ignore */ }
@@ -542,7 +813,8 @@ async function handleAnswer(payload) {
         await markRemoteDescriptionSet();
         setPhase('ringing');
         clearRingTimer();
-        void playRemoteAudio();
+        stopRingbackTone();
+        playRemoteAudio();
     } catch {
         deps?.showToast?.('Arama yanıtı işlenemedi.', { type: 'error' });
         await teardownCall({ notifyRemote: true, reason: 'hangup' });
@@ -554,9 +826,35 @@ async function handleIce(payload) {
     await queueOrAddIceCandidate(payload.candidate);
 }
 
+async function dismissCallOnOtherDevice(payload) {
+    if (payload.call_id !== callId) return;
+    if (phase === 'idle') return;
+    await teardownCall({ notifyRemote: false });
+}
+
 export async function handleVoiceCallSignal(payload) {
     if (!payload?.call_id || !payload?.type || !payload?.from_user_id) return;
-    if (payload.from_user_id === deps?.getUserId?.()) return;
+
+    const myId = deps?.getUserId?.();
+    const fromSelf = Boolean(myId && payload.from_user_id === myId);
+    const sameSession = Boolean(payload.session_id && payload.session_id === callSessionId);
+
+    if (fromSelf && sameSession) return;
+
+    if (fromSelf && !sameSession) {
+        switch (payload.type) {
+            case 'decline':
+            case 'hangup':
+            case 'call_claimed':
+            case 'answer':
+            case 'no_answer':
+                await dismissCallOnOtherDevice(payload);
+                break;
+            default:
+                break;
+        }
+        return;
+    }
 
     switch (payload.type) {
         case 'invite':
@@ -621,10 +919,12 @@ export async function startVoiceCall() {
 
     try {
         setPhase('calling');
-        pc = await createPeerConnection();
+        startRingbackTone();
+        primeRemoteAudioPlayback();
         await ensureLocalAudio();
-        ensureAudioTransceiver(pc);
+        pc = await createPeerConnection();
         attachLocalTracks(pc);
+        bindIceCandidateHandler(pc);
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -668,8 +968,18 @@ function toggleMute() {
 
 export function initVoiceCall(options) {
     deps = options;
+    bindCallAudioUnlock();
     remoteAudioEl = el('voiceCallRemoteAudio');
+    if (remoteAudioEl) {
+        remoteAudioEl.autoplay = true;
+        remoteAudioEl.playsInline = true;
+        remoteAudioEl.setAttribute('playsinline', '');
+        remoteAudioEl.setAttribute('webkit-playsinline', '');
+    }
 
+    el('voiceCallAcceptBtn')?.addEventListener('pointerdown', () => {
+        if (phase === 'incoming') primeRemoteAudioPlayback();
+    }, { passive: true });
     el('voiceCallAcceptBtn')?.addEventListener('click', () => void acceptIncoming());
     el('voiceCallDeclineBtn')?.addEventListener('click', () => rejectIncoming());
     el('voiceCallEndBtn')?.addEventListener('click', () => void endVoiceCall());
@@ -686,4 +996,5 @@ export function initVoiceCall(options) {
     });
 
     syncCallUi();
+    void fetchIceServers().catch(() => {});
 }

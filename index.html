@@ -1764,12 +1764,13 @@
 
         #voiceCallRemoteAudio {
             position: fixed;
-            width: 0;
-            height: 0;
-            opacity: 0;
+            width: 1px;
+            height: 1px;
+            opacity: 0.01;
             pointer-events: none;
             left: 0;
             bottom: 0;
+            z-index: -1;
         }
 
         @keyframes mic-pulse {

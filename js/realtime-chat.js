@@ -21,6 +21,7 @@ const CALL_SIGNAL_DEDUPE_MS = 4000;
 
 export function shouldDedupeCallSignal(payload) {
     if (!payload?.call_id || !payload?.type) return false;
+    if (payload.type === 'ice') return false;
     const key = `${payload.call_id}:${payload.type}:${payload.from_user_id || ''}`;
     const now = Date.now();
     const prev = recentCallSignalKeys.get(key);
