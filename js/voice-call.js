@@ -118,6 +118,8 @@ let pcConnectionFailedTimer = null;
 let outboundIceReleased = false;
 /** @type {{ type: string; candidate?: RTCIceCandidateInit }[]} */
 const pendingOutboundIceSignals = [];
+/** ICE trickle gönderimini sıraya al (mobilde paralel flood Realtime’ı bozabiliyor). */
+let outboundSignalChain = Promise.resolve();
 
 function resetOutboundIceGate() {
     outboundIceReleased = false;
@@ -129,8 +131,15 @@ function releaseOutboundIceGate() {
     outboundIceReleased = true;
     const queue = pendingOutboundIceSignals.splice(0);
     for (const extra of queue) {
-        void sendSignal(extra);
+        void enqueueOutboundSignal(extra);
     }
+}
+
+function enqueueOutboundSignal(extra) {
+    outboundSignalChain = outboundSignalChain
+        .then(() => sendSignal(extra))
+        .catch(() => false);
+    return outboundSignalChain;
 }
 
 const callSessionId = (() => {
@@ -181,6 +190,15 @@ function toSessionDescription(sdp) {
     if (typeof sdp === 'object' && sdp.type && sdp.sdp) {
         return new RTCSessionDescription(sdp);
     }
+    return null;
+}
+
+/** Realtime broadcast için düz JSON (mobil RTCSessionDescription serileştirme). */
+function serializeSessionDescription(desc) {
+    if (!desc) return null;
+    const type = desc.type;
+    const sdp = desc.sdp;
+    if (type && sdp) return { type, sdp };
     return null;
 }
 
@@ -309,6 +327,43 @@ function waitForIceGathering(connection, timeoutMs = ICE_GATHERING_TIMEOUT_MS) {
         };
         connection.addEventListener('icegatheringstatechange', onChange);
         const timer = window.setTimeout(finish, timeoutMs);
+    });
+}
+
+const MOBILE_INVITE_ICE_WAIT_MS = 6000;
+
+function waitForRelayIceCandidate(connection, timeoutMs) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (found) => {
+            if (settled) return;
+            settled = true;
+            connection.removeEventListener('icecandidate', onIce);
+            window.clearTimeout(timer);
+            resolve(found);
+        };
+        const onIce = (event) => {
+            const line = event.candidate?.candidate || '';
+            if (/ typ relay /i.test(line)) finish(true);
+        };
+        connection.addEventListener('icecandidate', onIce);
+        const timer = window.setTimeout(() => finish(false), timeoutMs);
+        if (connection.iceGatheringState === 'complete') {
+            window.setTimeout(() => finish(false), 0);
+        }
+    });
+}
+
+/** Mobil arayan: TURN relay adayı veya toplama bitene kadar kısa bekle (farklı ağda PC’nin bağlanması için). */
+async function waitForCallerInviteSdpReady(connection) {
+    if (!isMobileVoiceClient()) return;
+    const sawRelay = await waitForRelayIceCandidate(connection, MOBILE_INVITE_ICE_WAIT_MS);
+    if (!sawRelay) {
+        await waitForIceGathering(connection, MOBILE_INVITE_ICE_WAIT_MS);
+    }
+    logSignalingFlow('caller', 'Mobil invite öncesi ICE bekleme bitti', {
+        sawRelay,
+        gatheringState: connection.iceGatheringState
     });
 }
 
@@ -562,7 +617,7 @@ function bindIceCandidateHandler(connection) {
             pendingOutboundIceSignals.push(extra);
             return;
         }
-        void sendSignal(extra);
+        void enqueueOutboundSignal(extra);
     };
 }
 
@@ -829,12 +884,16 @@ function attachLocalTracks(connection) {
 
 async function sendSignal(extra) {
     if (!callId || !conversationId || !deps?.getUserId?.()) return false;
+    const signalExtra = { ...extra };
+    if (signalExtra.sdp) {
+        signalExtra.sdp = serializeSessionDescription(signalExtra.sdp) || signalExtra.sdp;
+    }
     const payload = {
         call_id: callId,
         conversation_id: conversationId,
         from_user_id: deps.getUserId(),
         session_id: callSessionId,
-        ...extra
+        ...signalExtra
     };
     logCallBroadcast('→', extra?.type, {
         call_id: callId,
@@ -1342,6 +1401,10 @@ export async function startVoiceCall() {
         startRingbackTone();
         primeRemoteAudioPlayback();
         resetOutboundIceGate();
+        if (deps?.ensureCallBroadcastReady) {
+            await deps.ensureCallBroadcastReady(convId).catch(() => false);
+        }
+        void fetchIceServers({ forActiveCall: true }).catch(() => {});
         await ensureLocalAudio();
         pc = await createPeerConnection();
         attachLocalTracks(pc);
@@ -1349,7 +1412,7 @@ export async function startVoiceCall() {
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        // Invite hemen gitsin; ek ICE adayları trickle ile (gecikme olmasın diye toplama beklenmiyor).
+        await waitForCallerInviteSdpReady(pc);
 
         const sent = await sendSignal({
             type: 'invite',

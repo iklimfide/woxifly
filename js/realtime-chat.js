@@ -312,6 +312,19 @@ async function sendCallOnChannel(channel, payload) {
     }
 }
 
+function pickCallBroadcastChannel(conversationId) {
+    const roomKey = `dm:${conversationId}`;
+    if (activeChannel && activeRoomKey === roomKey && activeChannel.state === 'joined') {
+        return activeChannel;
+    }
+    const notifyChannel = notificationChannelByConversation.get(conversationId);
+    if (notifyChannel && notifyChannel.state === 'joined') {
+        return notifyChannel;
+    }
+    if (activeChannel && activeRoomKey === roomKey) return activeChannel;
+    return notifyChannel || null;
+}
+
 export async function broadcastCallSignal(payload) {
     if (!payload?.conversation_id) return false;
 
@@ -323,23 +336,19 @@ export async function broadcastCallSignal(payload) {
         });
     }
 
-    const roomKey = `dm:${payload.conversation_id}`;
-    const tried = new Set();
-    let sent = false;
-
-    const trySend = async (channel) => {
-        if (!channel || tried.has(channel)) return false;
-        tried.add(channel);
-        if (channel.state !== 'joined') return false;
-        return sendCallOnChannel(channel, payload);
-    };
-
-    if (activeChannel && activeRoomKey === roomKey) {
-        sent = await trySend(activeChannel) || sent;
+    const primary = pickCallBroadcastChannel(payload.conversation_id);
+    if (primary && primary.state === 'joined') {
+        return sendCallOnChannel(primary, payload);
     }
 
+    const roomKey = `dm:${payload.conversation_id}`;
+    if (activeChannel && activeRoomKey === roomKey && activeChannel !== primary) {
+        const sent = await sendCallOnChannel(activeChannel, payload);
+        if (sent) return true;
+    }
     const notifyChannel = notificationChannelByConversation.get(payload.conversation_id);
-    sent = await trySend(notifyChannel) || sent;
-
-    return sent;
+    if (notifyChannel && notifyChannel !== primary) {
+        return sendCallOnChannel(notifyChannel, payload);
+    }
+    return false;
 }
