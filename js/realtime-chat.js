@@ -87,6 +87,12 @@ export function syncDmNotificationRooms(supabase, conversationIds, {
             supabase.removeChannel(channel);
             notificationChannels.delete(convId);
             notificationChannelByConversation.delete(convId);
+            continue;
+        }
+        if (channel.state === 'closed' || channel.state === 'errored') {
+            supabase.removeChannel(channel);
+            notificationChannels.delete(convId);
+            notificationChannelByConversation.delete(convId);
         }
     }
 

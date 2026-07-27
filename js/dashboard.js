@@ -931,7 +931,7 @@ async function handleDeleteConversation(userId, username = 'Kullanıcı') {
 
         removeDmFromSidebar(userId, { keepConversation: true });
         removeNotificationsForChat(`User-${userId}`, userId);
-        refreshDmNotificationListeners();
+        maintainBackgroundCallListeners();
 
         if (currentActiveChat === `User-${userId}`) {
             leaveRealtimeRoom();
@@ -1348,6 +1348,7 @@ window.switchView = function (panelId, { skipRouteSave = false } = {}) {
         updateSelectionBarUi(0);
     }
     if (!skipRouteSave) saveAppRoute();
+    maintainBackgroundCallListeners();
 };
 
 window.saveProfile = saveProfile;
@@ -1383,7 +1384,7 @@ async function showChatListHome() {
     currentActiveChat = null;
     currentConversationId = null;
     leaveRealtimeRoom();
-    refreshDmNotificationListeners();
+    maintainBackgroundCallListeners();
     clearVoiceCallConversationContext();
     updateTopbarCallButtonVisibility(false);
     clearPendingQuote();
@@ -1871,6 +1872,20 @@ function getUserIdForConversation(conversationId) {
     return null;
 }
 
+/** Açık DM sohbet ekranı (profil/bulut/sohbet listesi değil). */
+function isActiveDmChatView() {
+    const activePanel = document.querySelector('.view-panel.active')?.id;
+    if (activePanel !== 'chat-panel') return false;
+    if (document.body.classList.contains('member-profile-view')) return false;
+    if (document.body.classList.contains('chats-home-view')) return false;
+    if (!currentConversationId || !currentActiveChat?.startsWith('User-')) return false;
+    return true;
+}
+
+function getDmNotificationActiveConversationId() {
+    return isActiveDmChatView() ? currentConversationId : null;
+}
+
 function refreshDmNotificationListeners() {
     if (!isLoggedIn()) {
         leaveDmNotificationRooms();
@@ -1879,10 +1894,22 @@ function refreshDmNotificationListeners() {
 
     const conversationIds = [...new Set(dmConversations.values())];
     syncDmNotificationRooms(supabase, conversationIds, {
-        activeConversationId: currentConversationId,
+        activeConversationId: getDmNotificationActiveConversationId(),
         onMessage: handleIncomingDmNotification,
         onReaction: handleIncomingReactionNotification
     });
+}
+
+/** Sohbet dışındayken aramalar bildirim kanallarından dinlenir (aktif oda kapatılır). */
+function maintainBackgroundCallListeners() {
+    if (!isLoggedIn()) return;
+    if (!isActiveDmChatView()) {
+        leaveRealtimeRoom();
+    }
+    refreshDmNotificationListeners();
+    for (const convId of new Set(dmConversations.values())) {
+        void ensureCallBroadcastReady(supabase, convId).catch(() => {});
+    }
 }
 
 /** Gelen arama: sohbet ekranında değilken de Realtime dinleyicisini garanti et. */
@@ -1897,16 +1924,17 @@ function onIncomingCallWhileBrowsing({ conversationId, partnerUserId, partnerNam
         dmTitles.set(partnerUserId, partnerName);
     }
     if (changed) {
-        refreshDmNotificationListeners();
+        maintainBackgroundCallListeners();
+    } else {
+        void ensureCallBroadcastReady(supabase, conversationId).catch(() => {});
     }
-    void ensureCallBroadcastReady(supabase, conversationId).catch(() => {});
 }
 
 function reconnectDmRealtime() {
     if (!isLoggedIn()) return;
     void getAccessTokenForApi({ forceRefresh: true }).catch(() => {});
-    refreshDmNotificationListeners();
-    if (currentConversationId) {
+    maintainBackgroundCallListeners();
+    if (isActiveDmChatView()) {
         subscribeDmRealtime(currentConversationId);
     }
 }
@@ -3456,7 +3484,7 @@ async function openChat(chatId, title, { avatarUrl = null } = {}) {
     }
 
     subscribeDmRealtime(currentConversationId);
-    refreshDmNotificationListeners();
+    maintainBackgroundCallListeners();
     onVoiceCallConversationContext({
         conversationId: currentConversationId,
         partnerUserId: userId,
@@ -4236,7 +4264,7 @@ async function loadDmHistory() {
         };
     }
 
-    refreshDmNotificationListeners();
+    maintainBackgroundCallListeners();
     return mostRecentDmChat;
 }
 

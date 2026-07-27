@@ -1735,6 +1735,36 @@
         .voice-call-btn--end { background: #ef4444; color: #fff; }
         .voice-call-btn--mute { background: #e2e8f0; color: #334155; }
 
+        body.voice-call-connected .voice-call-sheet {
+            background: linear-gradient(165deg, #15803d 0%, #166534 48%, #14532d 100%);
+            border-color: #14532d;
+            box-shadow: 0 24px 48px rgba(20, 83, 45, 0.45);
+        }
+
+        body.voice-call-connected .voice-call-sheet h2,
+        body.voice-call-connected .voice-call-status {
+            color: #fff;
+        }
+
+        body.voice-call-connected .voice-call-status {
+            opacity: 0.95;
+        }
+
+        body.voice-call-connected .voice-call-btn--mute {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+        }
+
+        body.voice-call-connected .voice-call-btn--end {
+            background: #ef4444;
+            color: #fff;
+        }
+
+        body.voice-call-connected .voice-call-btn--end:active {
+            background: #dc2626;
+        }
+
         .voice-call-in-bar {
             display: flex;
             align-items: center;
