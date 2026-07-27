@@ -55,9 +55,13 @@ const callSessionId = (() => {
     }
 })();
 
+/** Karşı tarafın ICE adayları (PC oluşmadan / remote SDP gelmeden). */
+const prePcIceCandidates = [];
+
 function resetIceState() {
     remoteDescriptionSet = false;
     pendingIceCandidates.length = 0;
+    prePcIceCandidates.length = 0;
 }
 
 function toSessionDescription(sdp) {
@@ -101,7 +105,29 @@ async function queueOrAddIceCandidate(candidateInit) {
 
 async function markRemoteDescriptionSet() {
     remoteDescriptionSet = true;
+    while (prePcIceCandidates.length) {
+        pendingIceCandidates.push(prePcIceCandidates.shift());
+    }
     await flushPendingIceCandidates();
+}
+
+function waitForIceGathering(connection, timeoutMs = 4000) {
+    return new Promise((resolve) => {
+        if (connection.iceGatheringState === 'complete') {
+            resolve();
+            return;
+        }
+        const finish = () => {
+            connection.removeEventListener('icegatheringstatechange', onChange);
+            window.clearTimeout(timer);
+            resolve();
+        };
+        const onChange = () => {
+            if (connection.iceGatheringState === 'complete') finish();
+        };
+        connection.addEventListener('icegatheringstatechange', onChange);
+        const timer = window.setTimeout(finish, timeoutMs);
+    });
 }
 
 function primeRemoteAudioPlayback() {
@@ -722,15 +748,16 @@ async function acceptIncoming() {
         await ensureLocalAudio();
         setPhase('ringing');
         pc = await createPeerConnection();
-        attachLocalTracks(pc);
         bindIceCandidateHandler(pc);
         const offerSdp = toSessionDescription(pendingOffer);
         if (!offerSdp) throw new Error('Geçersiz arama teklifi.');
         await pc.setRemoteDescription(offerSdp);
+        attachLocalTracks(pc);
         await markRemoteDescriptionSet();
         pendingOffer = null;
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        await waitForIceGathering(pc);
         await sendSignal({
             type: 'answer',
             sdp: pc.localDescription
@@ -823,7 +850,13 @@ async function handleAnswer(payload) {
 }
 
 async function handleIce(payload) {
-    if (!pc || payload.call_id !== callId || !payload.candidate) return;
+    if (payload.call_id !== callId || !payload.candidate) return;
+    if (!pc) {
+        if (phase === 'incoming' || phase === 'ringing' || phase === 'calling') {
+            prePcIceCandidates.push(payload.candidate);
+        }
+        return;
+    }
     await queueOrAddIceCandidate(payload.candidate);
 }
 
@@ -929,6 +962,7 @@ export async function startVoiceCall() {
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        await waitForIceGathering(pc);
 
         const sent = await sendSignal({
             type: 'invite',
