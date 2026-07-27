@@ -40,6 +40,12 @@ let remoteWebAudioSource = null;
 let cachedIceServers = null;
 let cachedIceServersAt = 0;
 const ICE_SERVERS_CACHE_MS = 5 * 60 * 1000;
+/** ICE aday toplama (invite/answer gönderimi öncesi). */
+const ICE_GATHERING_TIMEOUT_MS = 10000;
+/** connectionState 'failed' sonrası erken kapanmayı önlemek için bekleme. */
+const ICE_FAILED_GRACE_MS = 10000;
+
+let pcConnectionFailedTimer = null;
 
 const callSessionId = (() => {
     try {
@@ -73,15 +79,70 @@ function toSessionDescription(sdp) {
     return null;
 }
 
+function mapSignalTypeToLabel(type) {
+    switch (type) {
+        case 'invite':
+            return 'call-offer';
+        case 'answer':
+            return 'call-answer';
+        case 'ice':
+            return 'ice-candidate';
+        default:
+            return type || 'unknown';
+    }
+}
+
+function logCallBroadcast(direction, type, detail = {}) {
+    const label = mapSignalTypeToLabel(type);
+    console.log(`[voice-call] ${direction} broadcast ${label}`, detail);
+}
+
+function clearConnectionFailedTimer() {
+    if (pcConnectionFailedTimer != null) {
+        window.clearTimeout(pcConnectionFailedTimer);
+        pcConnectionFailedTimer = null;
+    }
+}
+
+function micErrorMessage(err) {
+    const name = err?.name || '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        return 'Mikrofon izni reddedildi.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        return 'Mikrofon bulunamadı.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+        return 'Mikrofon başka bir uygulama tarafından kullanılıyor olabilir.';
+    }
+    return err instanceof Error ? err.message : 'Mikrofon açılamadı.';
+}
+
 async function flushPendingIceCandidates() {
     if (!pc || !remoteDescriptionSet || !pc.remoteDescription) return;
+    const total = pendingIceCandidates.length;
+    if (total > 0) {
+        console.log(`[voice-call] ice-candidate: kuyruktan ${total} aday flush ediliyor`);
+    }
+    let ok = 0;
+    let fail = 0;
     while (pendingIceCandidates.length) {
         const init = pendingIceCandidates.shift();
         try {
             await pc.addIceCandidate(new RTCIceCandidate(init));
-        } catch {
-            /* stale */
+            ok += 1;
+            console.log('[voice-call] ice-candidate: addIceCandidate OK', {
+                n: ok,
+                sdpMid: init.sdpMid,
+                sdpMLineIndex: init.sdpMLineIndex
+            });
+        } catch (err) {
+            fail += 1;
+            console.warn('[voice-call] ice-candidate: addIceCandidate hata', err, init);
         }
+    }
+    if (total > 0) {
+        console.log('[voice-call] ice-candidate: flush bitti', { ok, fail });
     }
 }
 
@@ -98,20 +159,28 @@ async function queueOrAddIceCandidate(candidateInit) {
     }
     try {
         await pc.addIceCandidate(new RTCIceCandidate(cand));
-    } catch {
-        /* ignore stale */
+        console.log('[voice-call] ice-candidate: addIceCandidate (anında)', {
+            sdpMid: cand.sdpMid,
+            sdpMLineIndex: cand.sdpMLineIndex
+        });
+    } catch (err) {
+        console.warn('[voice-call] ice-candidate: addIceCandidate (anında) hata', err, cand);
     }
 }
 
 async function markRemoteDescriptionSet() {
     remoteDescriptionSet = true;
+    const preCount = prePcIceCandidates.length;
     while (prePcIceCandidates.length) {
         pendingIceCandidates.push(prePcIceCandidates.shift());
+    }
+    if (preCount > 0) {
+        console.log('[voice-call] ice-candidate: prePc kuyruğundan pending\'e taşındı', { preCount });
     }
     await flushPendingIceCandidates();
 }
 
-function waitForIceGathering(connection, timeoutMs = 4000) {
+function waitForIceGathering(connection, timeoutMs = ICE_GATHERING_TIMEOUT_MS) {
     return new Promise((resolve) => {
         if (connection.iceGatheringState === 'complete') {
             resolve();
@@ -503,13 +572,26 @@ async function createPeerConnection() {
 
     connection.onconnectionstatechange = () => {
         const state = connection.connectionState;
+        console.log('[voice-call] connectionState', {
+            connectionState: state,
+            iceConnectionState: connection.iceConnectionState,
+            callId,
+            role: isCaller ? 'caller' : 'callee'
+        });
         if (state === 'connected') {
+            clearConnectionFailedTimer();
             setPhase('connected');
             clearRingTimer();
             void playRemoteAudio();
         } else if (state === 'failed') {
-            deps?.showToast?.('Bağlantı kurulamadı.', { type: 'warning' });
-            void teardownCall({ notifyRemote: true, reason: 'hangup' });
+            console.error('[voice-call] connectionState failed; teardown için grace ms:', ICE_FAILED_GRACE_MS);
+            clearConnectionFailedTimer();
+            pcConnectionFailedTimer = window.setTimeout(() => {
+                pcConnectionFailedTimer = null;
+                if (connection.connectionState === 'connected' || phase === 'idle') return;
+                deps?.showToast?.('Bağlantı kurulamadı.', { type: 'warning' });
+                void teardownCall({ notifyRemote: true, reason: 'hangup' });
+            }, ICE_FAILED_GRACE_MS);
         } else if (state === 'disconnected') {
             deps?.showToast?.('Bağlantı koptu.', { type: 'warning' });
             void teardownCall({ notifyRemote: true, reason: 'hangup' });
@@ -517,7 +599,23 @@ async function createPeerConnection() {
     };
 
     connection.oniceconnectionstatechange = () => {
-        if (connection.iceConnectionState === 'connected' || connection.iceConnectionState === 'completed') {
+        const ice = connection.iceConnectionState;
+        console.log('[voice-call] iceConnectionState', {
+            iceConnectionState: ice,
+            connectionState: connection.connectionState,
+            iceGatheringState: connection.iceGatheringState,
+            signalingState: connection.signalingState,
+            callId,
+            role: isCaller ? 'caller' : 'callee'
+        });
+        if (ice === 'failed' || ice === 'disconnected') {
+            console.error('[voice-call] ICE bağlantı sorunu', {
+                iceConnectionState: ice,
+                connectionState: connection.connectionState
+            });
+        }
+        if (ice === 'connected' || ice === 'completed') {
+            clearConnectionFailedTimer();
             void playRemoteAudio();
         }
     };
@@ -527,15 +625,38 @@ async function createPeerConnection() {
 
 async function ensureLocalAudio() {
     if (localStream) return localStream;
-    localStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-        },
-        video: false
-    });
-    return localStream;
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            },
+            video: false
+        });
+        return localStream;
+    } catch (err) {
+        console.error('[voice-call] getUserMedia başarısız:', err);
+        throw err;
+    }
+}
+
+/** Aranan taraf: gelen call-offer SDP'sini remote description olarak uygular. */
+async function handleOffer(connection, offerInit) {
+    const offerSdp = toSessionDescription(offerInit);
+    if (!offerSdp) {
+        console.error('[voice-call] call-offer: geçersiz SDP');
+        throw new Error('Geçersiz arama teklifi.');
+    }
+    logCallBroadcast('↳', 'invite', { action: 'setRemoteDescription başlıyor', sdpType: offerSdp.type });
+    await connection.setRemoteDescription(offerSdp);
+    if (!connection.remoteDescription || connection.remoteDescription.type !== 'offer') {
+        console.error('[voice-call] call-offer: setRemoteDescription sonrası doğrulama başarısız', {
+            remoteType: connection.remoteDescription?.type
+        });
+        throw new Error('Uzak teklif uygulanamadı.');
+    }
+    console.log('[voice-call] call-offer: setRemoteDescription başarılı');
 }
 
 function attachLocalTracks(connection) {
@@ -557,7 +678,13 @@ async function sendSignal(extra) {
         session_id: callSessionId,
         ...extra
     };
-    return broadcastCallSignal(payload);
+    logCallBroadcast('→', extra?.type, {
+        call_id: callId,
+        conversation_id: conversationId
+    });
+    const sent = await broadcastCallSignal(payload);
+    console.log(`[voice-call] → broadcast ${mapSignalTypeToLabel(extra?.type)} gönderildi:`, sent);
+    return sent;
 }
 
 function partnerLabel(name) {
@@ -657,6 +784,7 @@ export function updateTopbarCallButtonVisibility(visible) {
 
 async function teardownCall({ notifyRemote = false, reason = 'hangup' } = {}) {
     clearRingTimer();
+    clearConnectionFailedTimer();
     stopAllCallAlertSounds();
     pendingOffer = null;
     resetIceState();
@@ -745,14 +873,35 @@ async function acceptIncoming() {
 
     try {
         await sendSignal({ type: 'call_claimed' }).catch(() => {});
-        await ensureLocalAudio();
+
+        try {
+            await ensureLocalAudio();
+        } catch (micErr) {
+            const msg = micErrorMessage(micErr);
+            console.error('[voice-call] Kabul: mikrofon alınamadı — arama sonlandırılıyor:', micErr);
+            deps?.showToast?.(msg, { type: 'error' });
+            await sendSignal({ type: 'decline' }).catch(() => {});
+            await teardownCall({ notifyRemote: false });
+            return;
+        }
+
         setPhase('ringing');
         pc = await createPeerConnection();
         bindIceCandidateHandler(pc);
-        const offerSdp = toSessionDescription(pendingOffer);
-        if (!offerSdp) throw new Error('Geçersiz arama teklifi.');
-        await pc.setRemoteDescription(offerSdp);
-        attachLocalTracks(pc);
+
+        const offerPayload = pendingOffer;
+        await handleOffer(pc, offerPayload);
+
+        try {
+            attachLocalTracks(pc);
+        } catch (trackErr) {
+            console.error('[voice-call] Kabul: yerel track eklenemedi — arama sonlandırılıyor:', trackErr);
+            deps?.showToast?.('Mikrofon akışı bağlanamadı.', { type: 'error' });
+            await sendSignal({ type: 'decline' }).catch(() => {});
+            await teardownCall({ notifyRemote: false });
+            return;
+        }
+
         await markRemoteDescriptionSet();
         pendingOffer = null;
         const answer = await pc.createAnswer();
@@ -837,7 +986,15 @@ async function handleAnswer(payload) {
     try {
         const answerSdp = toSessionDescription(payload.sdp);
         if (!answerSdp) throw new Error('Geçersiz yanıt');
+        logCallBroadcast('←', 'answer', { call_id: payload.call_id, action: 'setRemoteDescription başlıyor' });
         await pc.setRemoteDescription(answerSdp);
+        if (!pc.remoteDescription || pc.remoteDescription.type !== 'answer') {
+            console.error('[voice-call] call-answer: setRemoteDescription sonrası doğrulama başarısız', {
+                remoteType: pc.remoteDescription?.type
+            });
+            throw new Error('Uzak yanıt uygulanamadı.');
+        }
+        console.log('[voice-call] call-answer: setRemoteDescription başarılı');
         await markRemoteDescriptionSet();
         setPhase('ringing');
         clearRingTimer();
@@ -851,9 +1008,17 @@ async function handleAnswer(payload) {
 
 async function handleIce(payload) {
     if (payload.call_id !== callId || !payload.candidate) return;
+    logCallBroadcast('←', 'ice', {
+        call_id: payload.call_id,
+        buffered: !pc,
+        phase
+    });
     if (!pc) {
         if (phase === 'incoming' || phase === 'ringing' || phase === 'calling') {
             prePcIceCandidates.push(payload.candidate);
+            console.log('[voice-call] ice-candidate: PC yok, prePc kuyruğuna eklendi', {
+                prePcCount: prePcIceCandidates.length
+            });
         }
         return;
     }
@@ -893,9 +1058,11 @@ export async function handleVoiceCallSignal(payload) {
     switch (payload.type) {
         case 'invite':
             if (!payload.sdp) return;
+            logCallBroadcast('←', 'invite', { call_id: payload.call_id, from: payload.from_user_id });
             await handleInvite(payload);
             break;
         case 'answer':
+            logCallBroadcast('←', 'answer', { call_id: payload.call_id, from: payload.from_user_id });
             await handleAnswer(payload);
             break;
         case 'ice':
