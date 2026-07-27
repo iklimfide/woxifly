@@ -1,4 +1,4 @@
-import { fetchWithAuth } from './supabase-client.js';
+import { fetchWithAuth, getAccessTokenForApi } from './supabase-client.js';
 import { broadcastCallSignal } from './realtime-chat.js';
 import { formatDisplayUsername } from './utils.js';
 
@@ -501,17 +501,29 @@ function parseJsonResponse(text) {
     }
 }
 
-async function fetchIceServers() {
+async function fetchIceServers({ forActiveCall = false } = {}) {
     const now = Date.now();
     if (cachedIceServers && now - cachedIceServersAt < ICE_SERVERS_CACHE_MS) {
         return cachedIceServers;
+    }
+
+    let token = await getAccessTokenForApi();
+    if (!token) {
+        token = await getAccessTokenForApi({ forceRefresh: true });
+    }
+    if (!token) {
+        const loggedIn = deps?.isLoggedIn?.() === true;
+        if (forActiveCall || loggedIn) {
+            console.warn('[voice-call] Oturum token yok; TURN atlanıyor, STUN kullanılıyor.');
+        }
+        return DEFAULT_ICE_SERVERS;
     }
 
     let res;
     try {
         res = await fetchWithAuth('/api/turn-credentials');
     } catch (err) {
-        console.warn('[voice-call] turn-credentials atlanıyor (STUN):', err);
+        console.warn('[voice-call] turn-credentials isteği başarısız (STUN):', err);
         return DEFAULT_ICE_SERVERS;
     }
 
@@ -555,7 +567,7 @@ async function fetchIceServers() {
 
 async function createPeerConnection() {
     resetIceState();
-    const iceServers = await fetchIceServers();
+    const iceServers = await fetchIceServers({ forActiveCall: true });
     const connection = new RTCPeerConnection({
         iceServers,
         bundlePolicy: 'max-bundle',
@@ -970,7 +982,9 @@ async function handleInvite(payload) {
     }
 
     setPhase('incoming');
-    void fetchIceServers().catch(() => {});
+    if (deps?.isLoggedIn?.()) {
+        void fetchIceServers({ forActiveCall: true }).catch(() => {});
+    }
     startIncomingRingtone();
     showIncomingCallNotification(partnerDisplayName);
 
@@ -1198,5 +1212,7 @@ export function initVoiceCall(options) {
     });
 
     syncCallUi();
-    void fetchIceServers().catch(() => {});
+    if (deps?.isLoggedIn?.()) {
+        void fetchIceServers().catch(() => {});
+    }
 }
