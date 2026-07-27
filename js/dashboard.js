@@ -450,7 +450,7 @@ async function openDmByInviteCode(code) {
     if (currentMyInviteCode === normalized) {
         switchView('profile-panel');
         clearUserInviteQuery();
-        replaceAppPath('/profil');
+        replaceAppPath('/');
         return;
     }
 
@@ -1067,9 +1067,9 @@ function updateProfileShareLink() {
     }
 
     const url = buildProfileShareUrl();
-    linkEl.textContent = currentMyInviteCode;
-    linkEl.title = url || 'Davet linki';
-    linkEl.disabled = false;
+    linkEl.textContent = url || '—';
+    linkEl.title = url ? 'Davet linkini kopyalamak için tıklayın' : 'Davet linki';
+    linkEl.disabled = !url;
 }
 
 async function copyProfileShareUrl() {
@@ -1094,39 +1094,6 @@ async function copyProfileShareUrl() {
 }
 
 async function shareProfile() {
-    if (!isLoggedIn()) {
-        promptLogin();
-        return;
-    }
-
-    const url = buildProfileShareUrl();
-    if (!url) {
-        await ensureMyInviteCode();
-    }
-    const shareUrl = buildProfileShareUrl();
-    if (!shareUrl) {
-        showNotify('Davet linki oluşturulamadı.', { title: 'Paylaş', type: 'warning' });
-        return;
-    }
-
-    const username = getProfileShareUsername();
-    const shareData = {
-        title: 'Woxifly',
-        text: username
-            ? `${formatDisplayUsername(username)} ile Woxifly'de sohbet et`
-            : 'Woxifly daveti',
-        url: shareUrl
-    };
-
-    if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {
-        try {
-            await navigator.share(shareData);
-            return;
-        } catch (err) {
-            if (err.name === 'AbortError') return;
-        }
-    }
-
     await copyProfileShareUrl();
 }
 

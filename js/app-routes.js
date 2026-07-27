@@ -13,8 +13,8 @@ export function usernameToSlug(username) {
 }
 
 export function buildAppPath({ activePanel, currentActiveChat } = {}) {
-    if (activePanel === 'profile-panel') return '/profil';
     if (activePanel === 'bulut-panel') return '/bulut';
+    // Profil ve sohbet ana ekranı adres çubuğunda / kalır (/profil yalnızca doğrudan link için)
     return '/';
 }
 

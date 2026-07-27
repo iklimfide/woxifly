@@ -323,17 +323,19 @@ async function handleRegisterSubmit(event) {
         await ensureProfile(data.user.id, username);
 
         if (data.session) {
-            showToast('Kayıt başarılı.', { type: 'success' });
-            await finishAuth();
-            return;
+            await supabase.auth.signOut().catch(() => {});
         }
 
-        showToast('Kayıt başarılı, giriş yapabilirsiniz.', { type: 'success' });
+        showToast('Kayıt başarılı. Giriş ekranına yönlendiriliyorsunuz.', { type: 'success' });
         registerForm.reset();
         resetRegisterUsernameFieldStatus();
+        showAuthError(registerMessage, '');
         modalElements.loginForm.username.value = username;
+        modalElements.loginForm.password.value = '';
         switchAuthTab('login');
-    } catch {
+        setTimeout(() => document.getElementById('login-password')?.focus(), 100);
+    } catch (err) {
+        console.warn('[auth] kayıt:', err);
         showAuthError(registerMessage, 'Kayıt sırasında beklenmeyen bir hata oluştu.');
     } finally {
         setButtonLoading(registerBtn, false, 'Hesap Oluştur');
@@ -349,7 +351,9 @@ async function ensureProfile(userId, username) {
         updated_at: new Date().toISOString()
     }, { onConflict: 'id' });
 
-    if (error) throw error;
+    if (error) {
+        console.warn('[auth] profil upsert (tetikleyici zaten oluşturmuş olabilir):', error.message);
+    }
 }
 
 async function finishAuth() {
