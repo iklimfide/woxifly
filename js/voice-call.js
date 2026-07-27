@@ -575,19 +575,19 @@ function canShowIncomingCallNotification() {
 }
 
 function showIncomingCallNotification(fromName) {
-    if (!canShowIncomingCallNotification()) return;
     if (!callId) return;
 
     const label = partnerLabel(fromName);
-    const viewingIncomingChat =
+    const onCallerChat =
         !document.hidden
-        && document.hasFocus()
-        && deps?.getConversationId?.() === conversationId
-        && phase === 'incoming';
+        && deps?.getConversationId?.() === conversationId;
 
     try {
         closeIncomingCallNotification();
-        if (viewingIncomingChat) return;
+        const useOsNotification =
+            canShowIncomingCallNotification()
+            && (document.hidden || !document.hasFocus() || !onCallerChat);
+        if (!useOsNotification) return;
 
         incomingCallNotification = new Notification('Sesli arama', {
             body: `${label} sizi arıyor`,
@@ -946,7 +946,7 @@ function syncCallUi() {
 
     const busy = phase !== 'idle';
     const inCall = phase === 'connected';
-    const showOverlay = busy && !inCall;
+    const showOverlay = busy;
     const partner = partnerLabel(partnerDisplayName);
     const statusText = inCall
         ? (muted ? 'Sessiz · görüşmede' : 'Görüşmede')
@@ -956,7 +956,7 @@ function syncCallUi() {
     if (incoming) incoming.hidden = phase !== 'incoming';
     if (active) active.hidden = phase === 'idle' || phase === 'incoming';
 
-    if (inCallBar) inCallBar.hidden = !inCall;
+    if (inCallBar) inCallBar.hidden = true;
     if (inBarName) inBarName.textContent = partner;
     if (inBarStatus) inBarStatus.textContent = statusText;
     if (inBarMute) {
@@ -970,9 +970,9 @@ function syncCallUi() {
     if (status) {
         let line = '';
         if (phase === 'calling') line = 'Aranıyor…';
-        else if (phase === 'ringing') line = isCaller ? 'Görüşme kuruluyor…' : '';
-        else if (phase === 'connected') line = statusText;
-        else if (phase === 'incoming') line = 'Gelen sesli arama';
+        else if (phase === 'ringing') line = isCaller ? 'Görüşme kuruluyor…' : 'Bağlanıyor…';
+        else if (phase === 'connected') line = statusText || 'Görüşmede';
+        else if (phase === 'incoming') line = 'Gelen sesli arama · Kabul et veya reddet';
         status.textContent = line;
         status.hidden = !line;
     }
@@ -1118,6 +1118,17 @@ async function acceptIncoming() {
         await sendSignal({ type: 'call_claimed' }).catch(() => {});
         resetOutboundIceGate();
 
+        const activeConv = deps?.getConversationId?.();
+        if (conversationId && activeConv !== conversationId && deps?.openConversationForCall) {
+            void deps.openConversationForCall({
+                conversationId,
+                partnerUserId,
+                partnerName: partnerDisplayName
+            }).catch((err) => {
+                console.warn('[voice-call] Kabul: sohbet açılamadı:', err);
+            });
+        }
+
         try {
             await ensureLocalAudio();
         } catch (micErr) {
@@ -1211,10 +1222,16 @@ async function handleInvite(payload) {
     isCaller = false;
     takePreInviteIce(callId);
 
-    // Önce UI + zil; sohbet açılışı arka planda (openChat mesaj geçmişi yükleyebilir).
+    // Önce UI + zil (site genelinde ortada modal); sohbet sayfasına yönlendirme yok.
     setPhase('incoming');
+    primeRemoteAudioPlayback();
     startIncomingRingtone();
     showIncomingCallNotification(partnerDisplayName);
+    deps?.onIncomingCallWhileBrowsing?.({
+        conversationId: payload.conversation_id,
+        partnerUserId: payload.from_user_id,
+        partnerName: payload.from_name
+    });
 
     if (navigator.vibrate) {
         try { navigator.vibrate([120, 80, 120]); } catch { /* ignore */ }
@@ -1227,16 +1244,6 @@ async function handleInvite(payload) {
     const convId = payload.conversation_id;
     if (convId && deps?.ensureCallBroadcastReady) {
         void deps.ensureCallBroadcastReady(convId).catch(() => {});
-    }
-    const activeConv = deps?.getConversationId?.();
-    if (convId && activeConv !== convId && deps?.openConversationForCall) {
-        void deps.openConversationForCall({
-            conversationId: convId,
-            partnerUserId: payload.from_user_id,
-            partnerName: payload.from_name
-        }).catch((err) => {
-            console.warn('[voice-call] Gelen arama: sohbet arka planda açılamadı:', err);
-        });
     }
 }
 

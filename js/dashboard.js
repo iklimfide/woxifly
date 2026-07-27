@@ -1885,6 +1885,23 @@ function refreshDmNotificationListeners() {
     });
 }
 
+/** Gelen arama: sohbet ekranında değilken de Realtime dinleyicisini garanti et. */
+function onIncomingCallWhileBrowsing({ conversationId, partnerUserId, partnerName } = {}) {
+    if (!conversationId || !partnerUserId) return;
+    let changed = false;
+    if (!dmConversations.has(partnerUserId)) {
+        dmConversations.set(partnerUserId, conversationId);
+        changed = true;
+    }
+    if (partnerName) {
+        dmTitles.set(partnerUserId, partnerName);
+    }
+    if (changed) {
+        refreshDmNotificationListeners();
+    }
+    void ensureCallBroadcastReady(supabase, conversationId).catch(() => {});
+}
+
 function reconnectDmRealtime() {
     if (!isLoggedIn()) return;
     void getAccessTokenForApi({ forceRefresh: true }).catch(() => {});
@@ -4395,7 +4412,8 @@ async function initDashboard() {
             showToast,
             recordCallLog: (args) => dispatchCallLogMessage(args),
             isIncomingCallNotifyEnabled: () => Notification.permission === 'granted',
-            ensureCallBroadcastReady: (conversationId) => ensureCallBroadcastReady(supabase, conversationId)
+            ensureCallBroadcastReady: (conversationId) => ensureCallBroadcastReady(supabase, conversationId),
+            onIncomingCallWhileBrowsing
         });
     });
     document.getElementById('appHomeLink')?.addEventListener('click', (event) => {
