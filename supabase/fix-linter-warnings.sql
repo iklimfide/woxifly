@@ -83,8 +83,8 @@ grant execute on function public.hide_messages_for_me(uuid[]) to authenticated;
 revoke all on function public.soft_delete_messages(uuid[]) from public, anon;
 grant execute on function public.soft_delete_messages(uuid[]) to authenticated;
 
-revoke all on function public.is_username_available(text, uuid) from public, anon;
-grant execute on function public.is_username_available(text, uuid) to authenticated;
+revoke all on function public.is_username_available(text, uuid) from public;
+grant execute on function public.is_username_available(text, uuid) to anon, authenticated;
 
 revoke all on function public.sync_profile_district() from public, anon, authenticated;
 

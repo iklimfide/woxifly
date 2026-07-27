@@ -121,6 +121,23 @@ async function handleLoginSubmit(event) {
     }
 }
 
+async function isUsernameAvailable(username) {
+    const normalized = sanitizeText(username, 24).toLowerCase();
+    if (!normalized || !isValidUsername(username)) return false;
+
+    const { data, error } = await supabase.rpc('is_username_available', {
+        p_username: username,
+        p_exclude: null
+    });
+
+    if (!error) {
+        return data === true || data === 'true';
+    }
+
+    console.warn('[auth] rumuz RPC:', error.message);
+    return true;
+}
+
 async function handleRegisterSubmit(event) {
     event.preventDefault();
     const { registerForm, registerBtn, registerMessage } = modalElements;
@@ -146,6 +163,15 @@ async function handleRegisterSubmit(event) {
         return;
     }
 
+    const usernameFree = await isUsernameAvailable(username);
+    if (!usernameFree) {
+        showAuthError(
+            registerMessage,
+            'Bu rumuz zaten kullanılıyor. Lütfen başka bir rumuz seçin.'
+        );
+        return;
+    }
+
     setButtonLoading(registerBtn, true, 'Hesap Oluştur');
 
     try {
@@ -163,7 +189,7 @@ async function handleRegisterSubmit(event) {
         });
 
         if (error) {
-            showAuthError(registerMessage, translateAuthError(error.message));
+            showAuthError(registerMessage, translateAuthError(error.message, { register: true }));
             return;
         }
 
@@ -208,7 +234,13 @@ async function finishAuth() {
     if (onAuthSuccess) await onAuthSuccess();
 }
 
-function translateAuthError(message) {
+function translateAuthError(message, { register = false } = {}) {
+    if (register && /database error saving new user/i.test(message)) {
+        return (
+            'Kayıt veritabanında tamamlanamadı. Rumuz başka birinde olabilir veya ' +
+            'Supabase\'te fix-signup-database-error.sql çalıştırılmamış olabilir.'
+        );
+    }
     const map = {
         'Invalid login credentials': 'E-posta veya şifre hatalı.',
         'User already registered': 'Bu e-posta adresi zaten kayıtlı.',

@@ -1427,7 +1427,10 @@ async function saveProfile() {
     }).eq('id', currentUserId);
 
     if (error) {
-        showNotify('Profil kaydedilemedi: ' + error.message, { title: 'Hata', type: 'error' });
+        const msg = /username_format|profiles_username_check/i.test(error.message)
+            ? 'Rumuz 2–24 karakter olmalı; harf, rakam, _ . - kullanılabilir. Veritabanında fix-username-format-constraint.sql çalıştırın.'
+            : error.message;
+        showNotify('Profil kaydedilemedi: ' + msg, { title: 'Hata', type: 'error' });
         return;
     }
 
