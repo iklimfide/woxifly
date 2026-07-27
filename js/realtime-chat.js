@@ -18,6 +18,9 @@ let dmNotificationActiveConversationId = null;
 
 const recentCallSignalKeys = new Map();
 const CALL_SIGNAL_DEDUPE_MS = 4000;
+/** Mobil ↔ masaüstü: Realtime broadcast gecikmesi için. */
+const CALL_BROADCAST_SEND_TIMEOUT_MS = 12000;
+const CALL_CHANNEL_JOIN_TIMEOUT_MS = 12000;
 
 export function shouldDedupeCallSignal(payload) {
     if (!payload?.call_id || !payload?.type) return false;
@@ -247,6 +250,48 @@ export async function broadcastReaction(payload) {
     }
 }
 
+/**
+ * Arama sinyali (offer/answer/ICE) göndermeden önce dm kanalının abone olduğundan emin ol.
+ * Telefonda sohbet açık değilken notify kanalı henüz join olmamış olabilir.
+ */
+export async function ensureCallBroadcastReady(supabase, conversationId, timeoutMs = CALL_CHANNEL_JOIN_TIMEOUT_MS) {
+    if (supabase) supabaseClient = supabase;
+    if (!supabaseClient || !conversationId) return false;
+
+    const roomKey = `dm:${conversationId}`;
+
+    let notifyChannel = notificationChannelByConversation.get(conversationId);
+    if (!notifyChannel) {
+        notifyChannel = supabaseClient.channel(roomKey, {
+            config: { broadcast: { ack: false, self: false } }
+        });
+        notifyChannel.on('broadcast', { event: 'call' }, ({ payload }) => {
+            dispatchCallSignal(payload);
+        });
+        notificationChannels.set(conversationId, notifyChannel);
+        notificationChannelByConversation.set(conversationId, notifyChannel);
+        notifyChannel.subscribe();
+    }
+
+    /** @type {import('@supabase/supabase-js').RealtimeChannel[]} */
+    const channels = [];
+    if (activeChannel && activeRoomKey === roomKey && !channels.includes(activeChannel)) {
+        channels.push(activeChannel);
+    }
+    if (notifyChannel && !channels.includes(notifyChannel)) {
+        channels.push(notifyChannel);
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (channels.some((ch) => ch.state === 'joined')) return true;
+        await new Promise((resolve) => {
+            setTimeout(resolve, 80);
+        });
+    }
+    return channels.some((ch) => ch.state === 'joined');
+}
+
 async function sendCallOnChannel(channel, payload) {
     if (!channel) return false;
     try {
@@ -257,7 +302,7 @@ async function sendCallOnChannel(channel, payload) {
                 payload
             }),
             new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Arama sinyali zaman aşımı')), 5000);
+                setTimeout(() => reject(new Error('Arama sinyali zaman aşımı')), CALL_BROADCAST_SEND_TIMEOUT_MS);
             })
         ]);
         return true;
@@ -270,25 +315,31 @@ async function sendCallOnChannel(channel, payload) {
 export async function broadcastCallSignal(payload) {
     if (!payload?.conversation_id) return false;
 
+    const ready = await ensureCallBroadcastReady(null, payload.conversation_id).catch(() => false);
+    if (!ready) {
+        console.warn('[realtime-chat] Arama broadcast kanalı hazır değil:', {
+            conversation_id: payload.conversation_id,
+            type: payload.type
+        });
+    }
+
     const roomKey = `dm:${payload.conversation_id}`;
+    const tried = new Set();
     let sent = false;
 
+    const trySend = async (channel) => {
+        if (!channel || tried.has(channel)) return false;
+        tried.add(channel);
+        if (channel.state !== 'joined') return false;
+        return sendCallOnChannel(channel, payload);
+    };
+
     if (activeChannel && activeRoomKey === roomKey) {
-        sent = await sendCallOnChannel(activeChannel, payload) || sent;
+        sent = await trySend(activeChannel) || sent;
     }
 
     const notifyChannel = notificationChannelByConversation.get(payload.conversation_id);
-    if (notifyChannel && notifyChannel !== activeChannel) {
-        sent = await sendCallOnChannel(notifyChannel, payload) || sent;
-    }
-
-    if (!sent && notifyChannel) {
-        sent = await sendCallOnChannel(notifyChannel, payload);
-    }
-
-    if (!sent && activeChannel) {
-        sent = await sendCallOnChannel(activeChannel, payload);
-    }
+    sent = await trySend(notifyChannel) || sent;
 
     return sent;
 }

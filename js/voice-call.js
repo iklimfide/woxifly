@@ -59,6 +59,10 @@ function voiceCallDebugLog(...args) {
     if (isVoiceCallDebugEnabled()) console.log(...args);
 }
 
+function isMobileVoiceClient() {
+    return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent || '');
+}
+
 function logSignalingFlow(role, step, detail = {}) {
     console.log(`[voice-call][signaling][${role}] ${step}`, detail);
 }
@@ -700,7 +704,8 @@ async function createPeerConnection() {
     const connection = new RTCPeerConnection({
         iceServers,
         bundlePolicy: 'max-bundle',
-        rtcpMuxPolicy: 'require'
+        rtcpMuxPolicy: 'require',
+        ...(isMobileVoiceClient() ? { iceCandidatePoolSize: 4 } : {})
     });
 
     connection.ontrack = (event) => {
@@ -847,7 +852,14 @@ async function sendSignal(extra) {
             call_id: callId
         });
     }
+    if (deps?.ensureCallBroadcastReady) {
+        await deps.ensureCallBroadcastReady(conversationId).catch(() => false);
+    }
     const sent = await broadcastCallSignal(payload);
+    if (!sent && (extra?.type === 'answer' || extra?.type === 'invite')) {
+        console.error('[voice-call] Kritik arama sinyali iletilemedi:', extra?.type, conversationId);
+        deps?.showToast?.('Arama sinyali karşı tarafa ulaşamadı. Ağı kontrol edip tekrar deneyin.', { type: 'warning' });
+    }
     if (extra?.type === 'answer') {
         logSignalingFlow(isCaller ? 'caller' : 'callee', '→ Supabase broadcast call-answer sonucu', { delivered: sent });
     }
@@ -1154,6 +1166,9 @@ async function handleInvite(payload) {
     }
 
     const convId = payload.conversation_id;
+    if (convId && deps?.ensureCallBroadcastReady) {
+        void deps.ensureCallBroadcastReady(convId).catch(() => {});
+    }
     const activeConv = deps?.getConversationId?.();
     if (convId && activeConv !== convId && deps?.openConversationForCall) {
         void deps.openConversationForCall({

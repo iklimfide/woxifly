@@ -38,7 +38,8 @@ import {
     broadcastReaction,
     broadcastMessageDelete,
     broadcastMessageEdit,
-    setVoiceCallSignalHandler
+    setVoiceCallSignalHandler,
+    ensureCallBroadcastReady
 } from './realtime-chat.js';
 import { sanitizeText, isValidUsername, formatDisplayUsername, createMessageElement, formatTime, formatQuotePreview, initPasswordVisibilityToggles, initPinVisibilityToggles, appendMessageToContainer, createMessageDateSeparator, getCalendarDayKey } from './utils.js';
 import {
@@ -4393,7 +4394,8 @@ async function initDashboard() {
             openConversationForCall,
             showToast,
             recordCallLog: (args) => dispatchCallLogMessage(args),
-            isIncomingCallNotifyEnabled: () => Notification.permission === 'granted'
+            isIncomingCallNotifyEnabled: () => Notification.permission === 'granted',
+            ensureCallBroadcastReady: (conversationId) => ensureCallBroadcastReady(supabase, conversationId)
         });
     });
     document.getElementById('appHomeLink')?.addEventListener('click', (event) => {
