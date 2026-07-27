@@ -1684,10 +1684,6 @@
             user-select: none;
         }
 
-        body.voice-call-active .voice-call-overlay {
-            pointer-events: auto;
-        }
-
         .voice-call-overlay[hidden] { display: none !important; }
 
         .voice-call-sheet {
@@ -4845,6 +4841,18 @@
 
     <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
 
+    <div class="search-overlay" id="searchOverlay" hidden>
+        <div class="search-panel" role="dialog" aria-modal="true" aria-label="Arama">
+            <div class="search-panel__head">
+                <input type="search" id="searchInput" class="search-panel__input" placeholder="Rumuz veya mesaj ara…" autocomplete="off" enterkeyhint="search">
+                <button type="button" class="search-panel__close" id="searchCloseBtn">İptal</button>
+            </div>
+            <div class="search-panel__body" id="searchResults"></div>
+        </div>
+    </div>
+
+    </div>
+
     <div class="voice-call-overlay" id="voiceCallOverlay" hidden>
         <div class="voice-call-sheet">
             <h2 id="voiceCallPartnerName">Kullanıcı</h2>
@@ -4860,18 +4868,6 @@
         </div>
     </div>
     <audio id="voiceCallRemoteAudio" autoplay playsinline></audio>
-
-    <div class="search-overlay" id="searchOverlay" hidden>
-        <div class="search-panel" role="dialog" aria-modal="true" aria-label="Arama">
-            <div class="search-panel__head">
-                <input type="search" id="searchInput" class="search-panel__input" placeholder="Rumuz veya mesaj ara…" autocomplete="off" enterkeyhint="search">
-                <button type="button" class="search-panel__close" id="searchCloseBtn">İptal</button>
-            </div>
-            <div class="search-panel__body" id="searchResults"></div>
-        </div>
-    </div>
-
-    </div>
 
     <!-- HESAP MAKİNESİ KAMUFLAJ PERDESİ -->
     <div class="hm-veil" id="hmVeil" aria-hidden="true" role="application" aria-label="Hesap makinesi">
