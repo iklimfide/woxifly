@@ -1,11 +1,107 @@
 import { supabase } from './supabase-client.js';
 import { getLocationCoords, DEFAULT_LOCATION } from './config.js';
-import { sanitizeText, isValidUsername, isValidEmail, setButtonLoading, showAuthError } from './utils.js';
+import {
+    sanitizeText,
+    isValidUsername,
+    isValidEmail,
+    setButtonLoading,
+    showAuthError,
+    initPasswordVisibilityToggles
+} from './utils.js';
+import {
+    normalizeLoginUsername,
+    resolveAuthLoginEmail,
+    isValidLoginPassword
+} from './auth-identity.js';
 import { openWelcomeModal } from './welcome-modal.js';
 import { showToast } from './notify-modal.js';
+
 let onAuthSuccess = null;
 let modalElements = null;
 let getIsLoggedIn = () => false;
+let registerUsernameCheckTimer = null;
+let registerUsernameCheckSeq = 0;
+let registerUsernameIsTaken = false;
+
+const USERNAME_HINT_NEUTRAL =
+    'Kullanıcı adı benzersiz olmalıdır (WoXifly ile woxifly aynı sayılır).';
+const USERNAME_HELP =
+    'Kullanıcı adı 2–24 karakter; harf, rakam, _ . - kullanılabilir.';
+const PASSWORD_HELP = 'Şifre en az 6 karakter olmalıdır.';
+const USERNAME_TAKEN_MSG =
+    'Bu kullanıcı adı zaten kullanılıyor. Lütfen başka bir ad seçin.';
+
+function readAuthPassword(raw) {
+    return String(raw ?? '').slice(0, 72);
+}
+
+function setRegisterUsernameFieldStatus(message, variant = 'muted') {
+    const el = document.getElementById('register-username-status');
+    if (!el) return;
+    el.textContent = message || USERNAME_HINT_NEUTRAL;
+    el.hidden = false;
+    el.className = `auth-field-status auth-field-status--${variant}`;
+}
+
+function resetRegisterUsernameFieldStatus() {
+    registerUsernameIsTaken = false;
+    registerUsernameCheckSeq += 1;
+    clearTimeout(registerUsernameCheckTimer);
+    setRegisterUsernameFieldStatus(USERNAME_HINT_NEUTRAL, 'muted');
+}
+
+async function runRegisterUsernameAvailabilityCheck(username) {
+    const seq = ++registerUsernameCheckSeq;
+    const trimmed = sanitizeText(username, 24);
+
+    if (!trimmed) {
+        resetRegisterUsernameFieldStatus();
+        return;
+    }
+
+    if (!isValidUsername(trimmed)) {
+        registerUsernameIsTaken = false;
+        if (trimmed.length >= 2) {
+            setRegisterUsernameFieldStatus(USERNAME_HELP, 'error');
+        } else {
+            setRegisterUsernameFieldStatus(USERNAME_HINT_NEUTRAL, 'muted');
+        }
+        return;
+    }
+
+    setRegisterUsernameFieldStatus('Kontrol ediliyor…', 'pending');
+    const available = await isUsernameAvailable(trimmed);
+    if (seq !== registerUsernameCheckSeq) return;
+
+    if (!available) {
+        setRegisterUsernameFieldStatus(USERNAME_TAKEN_MSG, 'error');
+        registerUsernameIsTaken = true;
+        return;
+    }
+
+    setRegisterUsernameFieldStatus('Bu ad kullanılabilir.', 'ok');
+    registerUsernameIsTaken = false;
+}
+
+function scheduleRegisterUsernameCheck() {
+    clearTimeout(registerUsernameCheckTimer);
+    const input = document.getElementById('register-username');
+    const username = sanitizeText(input?.value || '', 24);
+    registerUsernameCheckTimer = setTimeout(() => {
+        runRegisterUsernameAvailabilityCheck(username);
+    }, 400);
+}
+
+function bindRegisterUsernameLiveCheck() {
+    const input = document.getElementById('register-username');
+    if (!input || input.dataset.usernameCheckBound) return;
+    input.dataset.usernameCheckBound = '1';
+    input.addEventListener('input', scheduleRegisterUsernameCheck);
+    input.addEventListener('blur', () => {
+        clearTimeout(registerUsernameCheckTimer);
+        runRegisterUsernameAvailabilityCheck(input.value);
+    });
+}
 
 export function initAuthModal(successCallback, { isLoggedIn } = {}) {
     onAuthSuccess = successCallback;
@@ -29,6 +125,10 @@ export function initAuthModal(successCallback, { isLoggedIn } = {}) {
     modalElements.registerForm.addEventListener('submit', handleRegisterSubmit);
 
     document.getElementById('authModalCloseBtn')?.addEventListener('click', cancelAuthModal);
+    bindRegisterUsernameLiveCheck();
+    if (modalElements.modal) {
+        initPasswordVisibilityToggles(modalElements.modal);
+    }
 }
 
 export function cancelAuthModal() {
@@ -37,6 +137,7 @@ export function cancelAuthModal() {
     closeAuthModal();
     modalElements.loginForm.reset();
     modalElements.registerForm.reset();
+    resetRegisterUsernameFieldStatus();
     showAuthError(modalElements.loginMessage, '');
     showAuthError(modalElements.registerMessage, '');
 
@@ -57,7 +158,7 @@ export function openAuthModal(tab = 'login') {
 
     const firstInput = tab === 'register'
         ? document.getElementById('register-username')
-        : document.getElementById('login-email');
+        : document.getElementById('login-username');
     if (firstInput) setTimeout(() => firstInput.focus(), 100);
 }
 
@@ -82,52 +183,13 @@ function switchAuthTab(tabName) {
     }
 }
 
-async function handleLoginSubmit(event) {
-    event.preventDefault();
-    const { loginForm, loginBtn, loginMessage } = modalElements;
-    showAuthError(loginMessage, '');
-
-    const email = sanitizeText(loginForm.email.value, 254).toLowerCase();
-    const password = loginForm.password.value;
-
-    if (!isValidEmail(email)) {
-        showAuthError(loginMessage, 'Geçerli bir e-posta adresi girin.');
-        return;
-    }
-
-    if (password.length < 6) {
-        showAuthError(loginMessage, 'Şifre en az 6 karakter olmalıdır.');
-        return;
-    }
-
-    setButtonLoading(loginBtn, true, 'Giriş Yap');
-
-    try {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
-        if (error) {
-            showAuthError(loginMessage, translateAuthError(error.message));
-            return;
-        }
-
-        if (data.session) {
-            showToast('Giriş başarılı, yönlendiriliyorsunuz.', { type: 'success' });
-            await finishAuth();
-        }
-    } catch {
-        showAuthError(loginMessage, 'Giriş sırasında beklenmeyen bir hata oluştu.');
-    } finally {
-        setButtonLoading(loginBtn, false, 'Giriş Yap');
-    }
-}
-
-async function isUsernameAvailable(username) {
-    const normalized = sanitizeText(username, 24).toLowerCase();
+export async function isUsernameAvailable(username, excludeUserId = null) {
+    const normalized = normalizeLoginUsername(username);
     if (!normalized || !isValidUsername(username)) return false;
 
     const { data, error } = await supabase.rpc('is_username_available', {
         p_username: username,
-        p_exclude: null
+        p_exclude: excludeUserId
     });
 
     if (!error) {
@@ -138,43 +200,103 @@ async function isUsernameAvailable(username) {
     return true;
 }
 
+async function handleLoginSubmit(event) {
+    event.preventDefault();
+    const { loginForm, loginBtn, loginMessage } = modalElements;
+    showAuthError(loginMessage, '');
+
+    const loginId = sanitizeText(loginForm.username.value, 254);
+    const password = readAuthPassword(loginForm.password.value);
+    const email = resolveAuthLoginEmail(loginId);
+
+    if (!loginId) {
+        showAuthError(loginMessage, 'Kullanıcı adı girin.');
+        return;
+    }
+
+    if (!email) {
+        showAuthError(loginMessage, USERNAME_HELP);
+        return;
+    }
+
+    if (!isValidLoginPassword(password)) {
+        showAuthError(loginMessage, PASSWORD_HELP);
+        return;
+    }
+
+    if (!loginId.includes('@') && !isValidUsername(loginId)) {
+        showAuthError(loginMessage, USERNAME_HELP);
+        return;
+    }
+
+    if (loginId.includes('@') && !isValidEmail(loginId)) {
+        showAuthError(loginMessage, 'Geçerli bir e-posta adresi girin.');
+        return;
+    }
+
+    setButtonLoading(loginBtn, true, 'Giriş Yap');
+
+    try {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+        if (error) {
+            showAuthError(loginMessage, translateAuthError(error.message, { login: true }));
+            return;
+        }
+
+        if (data.session) {
+            showToast('Giriş başarılı.', { type: 'success' });
+            await finishAuth();
+        }
+    } catch {
+        showAuthError(loginMessage, 'Giriş sırasında beklenmeyen bir hata oluştu.');
+    } finally {
+        setButtonLoading(loginBtn, false, 'Giriş Yap');
+    }
+}
+
 async function handleRegisterSubmit(event) {
     event.preventDefault();
     const { registerForm, registerBtn, registerMessage } = modalElements;
     showAuthError(registerMessage, '');
 
     const username = sanitizeText(registerForm.username.value, 24);
-    const email = sanitizeText(registerForm.email.value, 254).toLowerCase();
-    const password = registerForm.password.value;
+    const password = readAuthPassword(registerForm.password.value);
+    const passwordConfirm = readAuthPassword(registerForm.elements.passwordConfirm?.value);
     const coords = getLocationCoords();
 
     if (!isValidUsername(username)) {
-        showAuthError(registerMessage, 'Rumuz 2-24 karakter olmalı; harf, rakam, _ . - kullanılabilir.');
+        setRegisterUsernameFieldStatus(USERNAME_HELP, 'error');
+        registerForm.username.focus();
         return;
     }
 
-    if (!isValidEmail(email)) {
-        showAuthError(registerMessage, 'Geçerli bir e-posta adresi girin.');
+    if (registerUsernameIsTaken) {
+        setRegisterUsernameFieldStatus(USERNAME_TAKEN_MSG, 'error');
+        registerForm.username.focus();
         return;
     }
 
-    if (password.length < 6) {
-        showAuthError(registerMessage, 'Şifre en az 6 karakter olmalıdır.');
+    if (!isValidLoginPassword(password)) {
+        showAuthError(registerMessage, PASSWORD_HELP);
         return;
     }
 
-    const usernameFree = await isUsernameAvailable(username);
-    if (!usernameFree) {
-        showAuthError(
-            registerMessage,
-            'Bu rumuz zaten kullanılıyor. Lütfen başka bir rumuz seçin.'
-        );
+    if (password !== passwordConfirm) {
+        showAuthError(registerMessage, 'Şifre tekrarı eşleşmiyor.');
         return;
     }
 
     setButtonLoading(registerBtn, true, 'Hesap Oluştur');
 
     try {
+        await runRegisterUsernameAvailabilityCheck(username);
+        if (registerUsernameIsTaken) {
+            registerForm.username.focus();
+            return;
+        }
+
+        const email = resolveAuthLoginEmail(username);
         const { data, error } = await supabase.auth.signUp({
             email,
             password,
@@ -201,12 +323,15 @@ async function handleRegisterSubmit(event) {
         await ensureProfile(data.user.id, username);
 
         if (data.session) {
-            await supabase.auth.signOut();
+            showToast('Kayıt başarılı.', { type: 'success' });
+            await finishAuth();
+            return;
         }
 
-        showToast('Kayıt başarılı, giriş ekranına yönlendiriliyorsunuz.', { type: 'success' });
+        showToast('Kayıt başarılı, giriş yapabilirsiniz.', { type: 'success' });
         registerForm.reset();
-        modalElements.loginForm.email.value = email;
+        resetRegisterUsernameFieldStatus();
+        modalElements.loginForm.username.value = username;
         switchAuthTab('login');
     } catch {
         showAuthError(registerMessage, 'Kayıt sırasında beklenmeyen bir hata oluştu.');
@@ -231,21 +356,24 @@ async function finishAuth() {
     closeAuthModal();
     modalElements.loginForm.reset();
     modalElements.registerForm.reset();
+    resetRegisterUsernameFieldStatus();
     if (onAuthSuccess) await onAuthSuccess();
 }
 
-function translateAuthError(message, { register = false } = {}) {
+function translateAuthError(message, { login = false, register = false } = {}) {
     if (register && /database error saving new user/i.test(message)) {
         return (
-            'Kayıt veritabanında tamamlanamadı. Rumuz başka birinde olabilir veya ' +
+            'Kayıt veritabanında tamamlanamadı. Kullanıcı adı alınmış olabilir veya ' +
             'Supabase\'te fix-signup-database-error.sql çalıştırılmamış olabilir.'
         );
     }
     const map = {
-        'Invalid login credentials': 'E-posta veya şifre hatalı.',
-        'User already registered': 'Bu e-posta adresi zaten kayıtlı.',
-        'Email not confirmed': 'Lütfen mailinizi onaylayınız.',
-        'Password should be at least 6 characters': 'Şifre en az 6 karakter olmalıdır.'
+        'Invalid login credentials': login
+            ? 'Kullanıcı adı veya şifre hatalı.'
+            : 'E-posta veya şifre hatalı.',
+        'User already registered': 'Bu kullanıcı adı zaten kayıtlı.',
+        'Email not confirmed': 'Lütfen hesabınızı onaylayın (e-posta doğrulaması açıksa).',
+        'Password should be at least 6 characters': PASSWORD_HELP
     };
     return map[message] || message;
 }

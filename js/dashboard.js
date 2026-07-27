@@ -1,5 +1,6 @@
 import { supabase, getSession, fetchWithAuth, initSessionKeepAlive, getAccessTokenForApi } from './supabase-client.js';
-import { initAuthModal, openAuthModal } from './auth-modal.js';
+import { initAuthModal, openAuthModal, isUsernameAvailable } from './auth-modal.js';
+import { normalizeLoginUsername } from './auth-identity.js';
 import { initWelcomeModal, maybeShowWelcomeModal, closeWelcomeModal } from './welcome-modal.js';
 import { initNotifyModal, showNotify, showToast, showConfirmToast, closeNotifyModal } from './notify-modal.js';
 import { initLinkViewer } from './link-viewer.js';
@@ -1399,6 +1400,17 @@ async function saveProfile() {
             type: 'warning'
         });
         return;
+    }
+
+    if (normalizeLoginUsername(newName) !== normalizeLoginUsername(currentMyUsername)) {
+        const available = await isUsernameAvailable(newName, currentUserId);
+        if (!available) {
+            showNotify('Bu kullanıcı adı zaten kullanılıyor. Lütfen başka bir ad seçin.', {
+                title: 'Kullanıcı adı alınmış',
+                type: 'warning'
+            });
+            return;
+        }
     }
 
     const hmEnabled = document.getElementById('hmPerdeInput')?.checked === true;
